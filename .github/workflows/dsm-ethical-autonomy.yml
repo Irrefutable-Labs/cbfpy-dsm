@@ -35,6 +35,25 @@ jobs:
       - name: Tests
         run: cargo test --release --locked --no-fail-fast
 
+  macos:
+    name: Tests on macOS, with sandbox-exec
+    # The command sandbox on macOS is sandbox-exec, and the agent-isolation test runs only there.
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: dsm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: brew install protobuf
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dsm
+      - name: Tests
+        run: cargo test --release --locked --no-fail-fast
+
   lint:
     name: Formatting and Clippy
     runs-on: ubuntu-latest
