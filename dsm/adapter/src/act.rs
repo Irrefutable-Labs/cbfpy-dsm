@@ -4,7 +4,8 @@
 //! command, which file, which recipient. The model supplies at most a piece of text. The enforcer
 //! runs an act only after its step is committed, writes only inside its world directory, and
 //! signs a receipt of exactly what it wrote. Every path is keyed by the step's sequence or fixed
-//! by the charter, so running an act again after a crash writes the same bytes.
+//! by the charter, so running an act again after a crash writes the same bytes. A command can
+//! write nothing at all, so running it again has no effect beyond its own output.
 
 use crate::charter::Keypair;
 use crate::commit;
@@ -37,8 +38,9 @@ pub enum Act {
     Message { recipient: String },
     /// Write the named file, replacing it: `files/<name>`.
     WriteFile { name: String },
-    /// Run a fixed command in the world directory with an empty environment, saving its
-    /// output to `runs/<sequence>.out`. No argument comes from the model.
+    /// Run a fixed command, confined by the operating system to reading the world, with no
+    /// network and no writes, saving its output to `runs/<sequence>.out`. No argument comes
+    /// from the model.
     Run { argv: Vec<String> },
 }
 
@@ -189,16 +191,86 @@ fn put(world: &Path, relative: &str, bytes: &[u8]) -> Result<Output, AdapterErro
     })
 }
 
-/// Run `argv` in `world` with an empty environment, for at most `limit`, keeping at most
-/// [`MAX_OUTPUT`] bytes of what it prints.
+/// The operating-system confinement a command runs in: no network, no write anywhere, and reads
+/// limited to system files and the world. With no way to confine a command on this system, no
+/// command runs at all.
+#[cfg(target_os = "macos")]
+fn confined(world: &Path, argv: &[String]) -> Result<Command, AdapterError> {
+    let world = world.canonicalize().map_err(io)?;
+    let world = world
+        .to_str()
+        .filter(|w| !w.contains('"') && !w.contains('\\'))
+        .ok_or_else(|| {
+            AdapterError::Effect("the world's path cannot be named in a profile".to_string())
+        })?;
+    let profile = format!(
+        "(version 1)(deny default)(import \"bsd.sb\")(allow process-exec process-fork)\
+         (allow file-read* (literal \"/\") (subpath \"/usr\") (subpath \"/bin\") \
+         (subpath \"/System\") (subpath \"/Library/Apple\") (subpath \"/private/var/db\") \
+         (subpath \"/dev\") (subpath \"{world}\"))(allow file-write* (literal \"/dev/null\"))"
+    );
+    let mut c = Command::new("/usr/bin/sandbox-exec");
+    c.arg("-p").arg(profile).args(argv).current_dir(world);
+    Ok(c)
+}
+
+#[cfg(target_os = "linux")]
+fn confined(world: &Path, argv: &[String]) -> Result<Command, AdapterError> {
+    const BWRAP: &str = "/usr/bin/bwrap";
+    if !Path::new(BWRAP).exists() {
+        return Err(AdapterError::Effect(
+            "commands run only under bubblewrap, and it is not installed".to_string(),
+        ));
+    }
+    let world = world.canonicalize().map_err(io)?;
+    let mut c = Command::new(BWRAP);
+    c.args([
+        "--unshare-all",
+        "--die-with-parent",
+        "--new-session",
+        "--clearenv",
+    ])
+    .args([
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+    ]);
+    for dir in ["/bin", "/sbin", "/lib", "/lib64", "/lib32"] {
+        let path = Path::new(dir);
+        if let Ok(target) = std::fs::read_link(path) {
+            c.arg("--symlink").arg(target).arg(dir);
+        } else if path.is_dir() {
+            c.args(["--ro-bind", dir, dir]);
+        }
+    }
+    c.arg("--ro-bind")
+        .arg(&world)
+        .arg("/world")
+        .args(["--chdir", "/world", "--"])
+        .args(argv);
+    Ok(c)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn confined(_world: &Path, _argv: &[String]) -> Result<Command, AdapterError> {
+    Err(AdapterError::Effect(
+        "no way to confine a command is known on this system, so none runs".to_string(),
+    ))
+}
+
+/// Run `argv` confined to `world`, with an empty environment, for at most `limit`, keeping at
+/// most [`MAX_OUTPUT`] bytes of what it prints. A confined command can write nothing, so running
+/// it again after a stop has no effect beyond its own output.
 pub fn run_command(
     world: &Path,
     argv: &[String],
     limit: Duration,
 ) -> Result<Vec<u8>, AdapterError> {
-    let mut child = Command::new(&argv[0])
-        .args(&argv[1..])
-        .current_dir(world)
+    let mut child = confined(world, argv)?
         .env_clear()
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -271,6 +343,23 @@ pub fn perform(
         )?],
     };
     Ok(outputs)
+}
+
+/// Remove temporary files an interrupted write left behind. Only the enforcer writes here.
+pub fn sweep_partial(world: &Path) -> Result<usize, AdapterError> {
+    let mut found = Vec::new();
+    if world.exists() {
+        walk(world, world, &mut found).map_err(io)?;
+    }
+    let mut removed = 0;
+    for (_, path) in found {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.starts_with('.') && name.ends_with(".partial") {
+            std::fs::remove_file(&path).map_err(io)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }
 
 fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, PathBuf)>) -> std::io::Result<()> {

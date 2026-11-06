@@ -4,8 +4,9 @@
 mod common;
 
 use common::*;
-use ethical_autonomy_adapter::act::{check_world, perform, run_command, Act};
+use ethical_autonomy_adapter::act::{check_world, perform, run_command, sweep_partial, Act};
 use ethical_autonomy_adapter::fork::Outcome;
+use ethical_autonomy_adapter::protocol::{Request, Response};
 use ethical_autonomy_adapter::server::Service;
 use ethical_autonomy_adapter::store::ChainStore;
 use ethical_autonomy_adapter::{
@@ -333,4 +334,179 @@ fn an_act_interrupted_by_a_stop_is_carried_out_at_the_next_start() {
 fn commit_text(e: &mut Enforcer, action: &str, text: &str) -> ethical_autonomy_adapter::StepRecord {
     let futures = e.fork(&[said(action, text)]);
     e.commit(&futures[0]).expect("commit")
+}
+
+fn run(world: &Path, argv: &[&str]) -> String {
+    let argv: Vec<String> = argv.iter().map(|a| a.to_string()).collect();
+    String::from_utf8_lossy(&run_command(world, &argv, Duration::from_secs(10)).expect("run"))
+        .to_string()
+}
+
+#[test]
+fn a_command_cannot_read_outside_the_world() {
+    let dir = place("read");
+    let world = dir.join("world");
+    std::fs::create_dir_all(&world).expect("world");
+    std::fs::write(dir.join("seed"), "the device key").expect("secret");
+    let out = run(&world, &["/bin/cat", dir.join("seed").to_str().unwrap()]);
+    assert!(!out.contains("the device key"), "{out}");
+    assert!(!out.contains("[exit 0]"), "{out}");
+}
+
+#[test]
+fn a_command_cannot_write_even_inside_the_world() {
+    let world = place("write");
+    let out = run(&world, &["/usr/bin/touch", "made.txt"]);
+    assert!(!out.contains("[exit 0]"), "{out}");
+    assert!(!world.join("made.txt").exists());
+    let outside = place("write-outside");
+    run(
+        &world,
+        &["/usr/bin/touch", outside.join("made.txt").to_str().unwrap()],
+    );
+    assert!(!outside.join("made.txt").exists());
+}
+
+#[test]
+fn a_command_has_no_network() {
+    let world = place("network");
+    if !Path::new("/usr/bin/curl").exists() {
+        return;
+    }
+    let out = run(
+        &world,
+        &[
+            "/usr/bin/curl",
+            "-s",
+            "-m",
+            "5",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "https://github.com",
+        ],
+    );
+    assert!(!out.contains("200") && !out.contains("301"), "{out}");
+    assert!(!out.contains("[exit 0]"), "{out}");
+}
+
+#[test]
+fn a_command_can_still_read_the_world() {
+    let world = place("readable");
+    std::fs::write(world.join("evidence.txt"), "seen").expect("write");
+    let out = run(&world, &["/bin/cat", "evidence.txt"]);
+    assert!(out.starts_with("seen"), "{out}");
+    assert!(out.contains("[exit 0]"), "{out}");
+}
+
+#[test]
+fn temporary_files_from_an_interrupted_write_are_swept() {
+    let world = place("sweep");
+    std::fs::create_dir_all(world.join("journal")).expect("dir");
+    std::fs::write(world.join("journal/.123.partial"), "half").expect("partial");
+    std::fs::write(world.join("journal/000001.md"), "kept").expect("kept");
+    assert_eq!(sweep_partial(&world).expect("sweep"), 1);
+    assert!(!world.join("journal/.123.partial").exists());
+    assert!(world.join("journal/000001.md").exists());
+}
+
+fn forked(r: Response) -> String {
+    match r {
+        Response::Forked { fork_root, .. } => fork_root,
+        other => panic!("expected a fork, got {other:?}"),
+    }
+}
+
+/// An act that fails halts the enforcer: nothing more commits, so no receipt can fall out of
+/// order, until a restart finishes the act.
+#[test]
+fn a_failed_act_halts_commits_until_a_restart_finishes_it() {
+    let dir = place("halt");
+    let world = dir.join("world");
+    let store = ChainStore::open(&dir.join("store")).expect("store");
+    let e = acting_enforcer();
+    store.begin(&e.state(), e.device_public()).expect("begin");
+    let mut service = Service::start(
+        e,
+        store,
+        world.clone(),
+        keys().authority.public.clone(),
+        &[],
+        0,
+    )
+    .expect("start");
+    // A file where the journal directory must go makes the journal act fail.
+    std::fs::write(world.join("journal"), "in the way").expect("block");
+
+    let propose = |s: &mut Service, text: &str| {
+        forked(s.handle(Request::Propose {
+            proposals: vec![said("explore_a_little", text)],
+        }))
+    };
+    let root = propose(&mut service, "first");
+    let failed = service.handle(Request::Choose {
+        fork_root: root,
+        index: 0,
+    });
+    assert!(
+        matches!(&failed, Response::Error { message } if message.contains("Nothing more commits")),
+        "{failed:?}"
+    );
+    let refused = service.handle(Request::Propose {
+        proposals: vec![said("add_precautions", "please review")],
+    });
+    assert!(
+        matches!(&refused, Response::Refused { reason } if reason.starts_with("halted")),
+        "{refused:?}"
+    );
+    drop(service);
+
+    std::fs::remove_file(world.join("journal")).expect("unblock");
+    let reopened = ChainStore::open(&dir.join("store")).expect("store");
+    let stored = reopened.load().expect("load");
+    assert_eq!(stored.steps.len(), 1);
+    assert_eq!(stored.receipts.len(), 0);
+    let resumed = Enforcer::resume(
+        keys().device.clone(),
+        acting_charter(),
+        &keys().authority.public,
+        &stored.genesis,
+        &stored.steps,
+    )
+    .expect("resume");
+    let mut service = Service::start(
+        resumed,
+        reopened,
+        world.clone(),
+        keys().authority.public.clone(),
+        &stored.steps,
+        stored.receipts.len(),
+    )
+    .expect("restart");
+    assert_eq!(
+        std::fs::read_to_string(world.join("journal/000001.md")).expect("act"),
+        "first"
+    );
+
+    let root = forked(service.handle(Request::Propose {
+        proposals: vec![said("add_precautions", "please review")],
+    }));
+    let committed = service.handle(Request::Choose {
+        fork_root: root,
+        index: 0,
+    });
+    assert!(
+        matches!(committed, Response::Committed { sequence: 2, .. }),
+        "{committed:?}"
+    );
+    let after = ChainStore::open(&dir.join("store"))
+        .expect("store")
+        .load()
+        .expect("load");
+    assert_eq!(
+        check_receipts(&keys().device.public, &after.steps, &after.receipts).expect("ok"),
+        0
+    );
+    assert_eq!(check_world(&world, &after.receipts).expect("clean"), 2);
 }

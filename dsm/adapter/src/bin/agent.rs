@@ -61,7 +61,13 @@ impl Link {
     }
 
     fn ask(&mut self, request: Request) -> Result<Response, String> {
-        send(&mut self.writer, &request).map_err(|e| e.to_string())?;
+        if let Err(e) = send(&mut self.writer, &request) {
+            // The enforcer may have refused the connection and closed it before reading.
+            if let Ok(Some(Response::Refused { reason })) = receive::<Response>(&mut self.reader) {
+                return Err(format!("the enforcer refused: {reason}"));
+            }
+            return Err(e.to_string());
+        }
         match receive::<Response>(&mut self.reader).map_err(|e| e.to_string())? {
             Some(Response::Error { message }) => Err(format!("the enforcer failed: {message}")),
             Some(r) => Ok(r),

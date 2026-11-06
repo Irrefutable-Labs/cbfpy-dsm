@@ -1,7 +1,12 @@
 //! The enforcer service. It holds the device key, the chain and the DSM head, and listens on a
 //! Unix socket that only its own user can open. A model never runs in this process.
 //!
-//! ethical-enforcer --store DIR --world DIR --charter C --signature SIG --device-seed FILE --socket PATH
+//! ethical-enforcer --store DIR --world DIR --charter C --signature SIG --authority PUBLIC
+//!                  --device-seed FILE --socket PATH [--agent-uid UID]
+//!
+//! With `--agent-uid`, only that user may use the socket, and it may not be the enforcer's own:
+//! the AI then cannot read the device seed, the store or the world's files by any route but
+//! this one. Without it, the enforcer runs in development mode, sharing its user with the AI.
 //!
 //! The world directory is where committed actions take effect, and nowhere else.
 //!
@@ -9,11 +14,11 @@
 //! full and replayed through core before anything is served. One that does not verify stops it.
 
 use ethical_autonomy_adapter::hexser::{decode, to_hex};
+use ethical_autonomy_adapter::keys::{read_public_key, read_secret_seed};
 use ethical_autonomy_adapter::server::Service;
 use ethical_autonomy_adapter::store::ChainStore;
 use ethical_autonomy_adapter::{
     check_receipts, keypair_from_seed, parse_charter_config, Enforcer, SignedCharter,
-    TRUSTED_AUTHORITY_PUBLIC,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
@@ -27,12 +32,15 @@ struct Args {
     signature: PathBuf,
     device_seed: PathBuf,
     socket: PathBuf,
+    authority: PathBuf,
+    agent_uid: Option<u32>,
 }
 
 fn args() -> Result<Args, String> {
     let mut a = std::env::args().skip(1);
     let (mut store, mut world, mut charter, mut signature, mut seed, mut socket) =
         (None, None, None, None, None, None);
+    let (mut authority, mut agent_uid) = (None, None);
     while let Some(flag) = a.next() {
         let value = a
             .next()
@@ -45,6 +53,15 @@ fn args() -> Result<Args, String> {
             "--signature" => signature = Some(value),
             "--device-seed" => seed = Some(value),
             "--socket" => socket = Some(value),
+            "--authority" => authority = Some(value),
+            "--agent-uid" => {
+                agent_uid = Some(
+                    value
+                        .to_str()
+                        .and_then(|v| v.parse().ok())
+                        .ok_or("--agent-uid needs a number")?,
+                )
+            }
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -55,6 +72,8 @@ fn args() -> Result<Args, String> {
         signature: signature.ok_or("--signature is required")?,
         device_seed: seed.ok_or("--device-seed is required")?,
         socket: socket.ok_or("--socket is required")?,
+        authority: authority.ok_or("--authority is required")?,
+        agent_uid,
     })
 }
 
@@ -62,26 +81,9 @@ fn read(path: &PathBuf) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn device_seed(path: &PathBuf) -> Result<[u8; 32], String> {
-    let mode = std::fs::metadata(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?
-        .permissions()
-        .mode();
-    if mode & 0o077 != 0 {
-        return Err(format!(
-            "{} is readable by others (mode {:o}); it must be owner-only",
-            path.display(),
-            mode & 0o777
-        ));
-    }
-    decode(read(path)?.trim())?
-        .try_into()
-        .map_err(|_| "the device seed must be 32 bytes of hexadecimal".to_string())
-}
-
 fn run() -> Result<(), String> {
     let args = args()?;
-    let trusted = decode(TRUSTED_AUTHORITY_PUBLIC)?;
+    let trusted = read_public_key(&args.authority).map_err(|e| e.to_string())?;
     let (policy, catalog) =
         parse_charter_config(&read(&args.charter)?).map_err(|e| e.to_string())?;
     let charter = SignedCharter {
@@ -92,7 +94,9 @@ fn run() -> Result<(), String> {
     charter
         .verify(&trusted)
         .map_err(|_| "the charter does not carry the trusted authority's signature".to_string())?;
-    let device = keypair_from_seed(&device_seed(&args.device_seed)?).map_err(|e| e.to_string())?;
+    let device =
+        keypair_from_seed(&read_secret_seed(&args.device_seed).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
 
     let store = ChainStore::open(&args.store).map_err(|e| e.to_string())?;
     let (enforcer, steps, receipts) = if store.exists() {
@@ -115,7 +119,7 @@ fn run() -> Result<(), String> {
         (e, vec![], 0)
     };
     let tip = enforcer.tip();
-    let service = Service::start(
+    let mut service = Service::start(
         enforcer,
         store,
         args.world.clone(),
@@ -124,12 +128,26 @@ fn run() -> Result<(), String> {
         receipts,
     )
     .map_err(|e| e.to_string())?;
+    let socket_mode = match args.agent_uid {
+        Some(uid) => {
+            service = service.only_for(uid).map_err(|e| e.to_string())?;
+            eprintln!("serving only user {uid}");
+            // Anyone may connect; the operating system's word on who they are decides.
+            0o666
+        }
+        None => {
+            eprintln!(
+                "development mode: the AI shares this user, so nothing but convention keeps it from the key"
+            );
+            0o600
+        }
+    };
 
     if args.socket.exists() {
         std::fs::remove_file(&args.socket).map_err(|e| e.to_string())?;
     }
     let listener = UnixListener::bind(&args.socket).map_err(|e| format!("bind: {e}"))?;
-    std::fs::set_permissions(&args.socket, std::fs::Permissions::from_mode(0o600))
+    std::fs::set_permissions(&args.socket, std::fs::Permissions::from_mode(socket_mode))
         .map_err(|e| e.to_string())?;
     eprintln!(
         "listening on {} at tip {}",

@@ -1,4 +1,4 @@
-# Technical report: DSM ethical autonomy prototype v0.3
+# Technical report: DSM ethical autonomy prototype v0.4
 
 **Date:** 2026-11-05. **Repository:** [Irrefutable-Labs/cbfpy-dsm](https://github.com/Irrefutable-Labs/cbfpy-dsm), a fork of CBFpy. **DSM:** `deterministicstatemachine/dsm` at `b6060a334`, a pinned git dependency. **DSM code changed:** none.
 
@@ -35,7 +35,7 @@ The audit verified every step from its parent alone and replayed it through DSM'
 | 7 | Unauthorized policy changes invalidate | Met | A moved center, widened band, bumped version, tampered catalog or stranger's signature are refused. The enforcer refuses a charter edited on disk |
 | 8 | Attributable to parent and policy | Met | Every step verifies from its one parent and carries its whole fork, and every act has a signed receipt tied to its step. An edited or dropped stored step stops the enforcer and fails the audit, and so does any file in the world no committed act wrote |
 | 9 | Entirely offline | Met on this machine | The recorded run had internet access denied by a macOS sandbox. Fetching dependencies needed the network once, beforehand |
-| 10 | Tests pass, results reproducible | Met, with limits | 147 Rust tests, formatting, Clippy, the CBFpy cross-check and the Lean proofs, all run in CI. Live model output is not reproducible, so its recording is what replays |
+| 10 | Tests pass, results reproducible | Met, with limits | 158 Rust tests, formatting, Clippy, the CBFpy cross-check and the Lean proofs, all run in CI. Live model output is not reproducible, so its recording is what replays |
 
 ## What supports each property
 
@@ -59,6 +59,10 @@ The audit verified every step from its parent alone and replayed it through DSM'
 - **The fork:** a refused candidate marked eligible, a fork missing the chosen step, an index pointing at a refused candidate, an empty fork, and an edited fork are each refused.
 - **The service:** a killed enforcer resumes exactly where it stopped. An edited store stops it, and the audit agrees. A device seed others can read is refused, and the socket is owner-only. Over the raw protocol, a client cannot choose a refused candidate, reuse a closed fork, or attach a score.
 - **Key and world isolation:** on macOS, the agent completes a run while the operating system denies it any read of the seed or the store and any write to the world. The same sandbox shows the seed is really out of reach and the world cannot be written directly. The world is nonetheless written, by the enforcer alone, and the audit agrees with it.
+- **Command confinement:** a command cannot read a secret beside the world, cannot write inside the world or outside it, and gets no network, yet can read the world. Tested on macOS with `sandbox-exec` here. On Linux, CI runs the same tests with `bwrap`.
+- **Halting:** an act that fails halts the enforcer. The next proposal is refused, and nothing commits until a restart finishes the act. After that, commits resume, receipts are in order and the world matches. Temporary files left by an interrupted write are removed at start.
+- **Separate users:** in separate-user mode, a client of any other user is refused by the operating system's account of who it is, and the enforcer will not start if told to serve its own user.
+- **The authority key:** the shipped charter is signed by a random key whose seed is not in the repository. A charter signed by another authority is refused. The signing tool will not replace a key or use one that others can read.
 - **Acts:** each act writes only its own path inside the world, and writes the same bytes if run twice. Acts that would leave the world cannot be signed into a charter or performed. Changing what an action does breaks the charter's signature. A command runs with an empty environment and is stopped at its time limit. An action that needs text and has none, or too much, cannot be committed. Text changed after the fork is refused by the enforcer and by the verifier.
 - **Receipts and the world:** an edited, extra or missing world file fails the check. A receipt out of order, or for the wrong step, is refused. A refused action never wrote anything: the interlock file a prohibited action names is never there. A step stored but not yet acted on, as after a stop between the two, has its act carried out at the next start, once, and the world then matches.
 - **Real DSM path:** core's `prepare_advance_relationship` and `commit_advance` run for real on every commit and every resume, and the verifier's entropy rule is compared with what core derived on every commit.
@@ -77,8 +81,9 @@ The audit verified every step from its parent alone and replayed it through DSM'
 - **Whether any measurement reflects morality.** This is the central open question, and nothing here touches it.
 - **Whether the catalog is complete.** An action outside it is refused, which fails safe but limits the AI to what was anticipated.
 - **Whether an action's words are acceptable.** A reply, message or file says what the model wrote. The engine weighs the action, not its words, so harmful text inside a permitted action passes. Measuring the words belongs to the open measurement question.
-- **Key custody.** The device seed is a file readable only by its owner, and the agent holds no key. Both programs still run as the same OS user. Separate users are the deployment step this does not take. Whoever holds the device key can sign any state, or leave a candidate out of a fork.
-- **Routes around the enforcer.** In the recorded run and the macOS test, the operating system denied the agent the network and any write to the world, so its only way to act was through the enforcer. That is a sandbox profile on one machine. A deployment would need the same confinement, and a model given any other way to act is not constrained by this.
+- **Key custody.** Separate-user mode is built and tested as far as one user can test it: a client of the wrong user is refused. Running the enforcer as a second user needs administrator rights and has not been done here. Until it is, the recorded run's sandbox profile is what kept the agent from the key, the store and the world. Whoever holds the device key can sign any state, or leave a candidate out of a fork.
+- **Routes around the enforcer.** In the recorded run and the macOS test, the operating system denied the agent the network and any write to the world, so its only way to act was through the enforcer. Separate-user mode makes this a standing boundary rather than a profile. A model given any other way to act is not constrained by this.
+- **The sandboxes themselves.** Command confinement relies on `sandbox-exec` and `bwrap` behaving as documented. Their own correctness is not examined here, and `sandbox-exec` is deprecated by Apple, though still shipped.
 - **Conflict across parties.** The enforcer refuses a second successor because its parent is no longer the tip. That is the only conflict exercised here. Nothing here tests or changes acceptance between peers, and A14 is untouched.
 - **Policy rotation.** There is no path. A chain lives under the policy it began with.
 - **Concurrency.** The enforcer serves one client at a time.
@@ -95,6 +100,15 @@ These were made to keep the build moving, and each can be reversed.
 6. **Coupling reads only the parent.**
 7. **A retry may only name a known action.** The first proposal at each turn may name anything.
 8. **The effects are illustrative.** Replies, journal entries, messages and files are written to a local directory, and the one command lists that directory. Connecting acts to real outside systems is a choice for the owner.
+
+## The external review of v0.3
+
+An outside review of PR #1 found four issues, each fixed in v0.4:
+
+1. **Commands were not confined.** They ran with an empty environment in the world directory, but could read anything the enforcer could and use the network. They now run under the operating system's sandbox, with no network, no writes, and reads limited to system files and the world. Where no sandbox exists, they do not run.
+2. **A failed act did not stop later commits**, so receipts could fall out of order and the store would then refuse to load. The enforcer now halts until a restart finishes the act. Since a command can no longer write, running one again is safe.
+3. **Isolation depended on a sandbox profile.** Separate-user mode now makes the operating system's identity of the client the boundary. Creating the user is still to be done, with administrator rights.
+4. **The authority key's seed was in the source.** It is now random, outside the repository and readable by its owner alone, and the programs are given only its public key.
 
 ## Reviews
 

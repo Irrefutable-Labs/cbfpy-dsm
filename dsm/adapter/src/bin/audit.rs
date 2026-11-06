@@ -2,23 +2,23 @@
 //! public key the store recorded. Each step is checked from its one parent and replayed through
 //! core's transition.
 //!
-//! ethical-audit --store DIR --charter C --signature SIG [--world DIR]
+//! ethical-audit --store DIR --charter C --signature SIG --authority PUBLIC [--world DIR]
 //!
 //! With `--world`, every file there must be exactly what a committed step's receipt says it
 //! wrote, and nothing else may be there.
 
 use ethical_autonomy_adapter::act::check_world;
 use ethical_autonomy_adapter::hexser::{decode, to_hex};
+use ethical_autonomy_adapter::keys::read_public_key;
 use ethical_autonomy_adapter::store::ChainStore;
-use ethical_autonomy_adapter::{
-    audit_chain, check_receipts, parse_charter_config, SignedCharter, TRUSTED_AUTHORITY_PUBLIC,
-};
+use ethical_autonomy_adapter::{audit_chain, check_receipts, parse_charter_config, SignedCharter};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn run() -> Result<(), String> {
     let mut a = std::env::args().skip(1);
-    let (mut store, mut charter, mut signature, mut world) = (None, None, None, None);
+    let (mut store, mut charter, mut signature, mut world, mut authority) =
+        (None, None, None, None, None);
     while let Some(flag) = a.next() {
         let value = a
             .next()
@@ -29,6 +29,7 @@ fn run() -> Result<(), String> {
             "--charter" => charter = Some(value),
             "--signature" => signature = Some(value),
             "--world" => world = Some(value),
+            "--authority" => authority = Some(value),
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -47,7 +48,8 @@ fn run() -> Result<(), String> {
     let device = store.device_public().map_err(|e| e.to_string())?;
     let stored = store.load().map_err(|e| e.to_string())?;
     let steps = stored.steps;
-    let trusted = decode(TRUSTED_AUTHORITY_PUBLIC)?;
+    let trusted =
+        read_public_key(&authority.ok_or("--authority is required")?).map_err(|e| e.to_string())?;
     let audit = audit_chain(&device, &charter, &trusted, &stored.genesis, &steps)
         .map_err(|e| e.to_string())?;
     let pending = check_receipts(&device, &steps, &stored.receipts).map_err(|e| e.to_string())?;

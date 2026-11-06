@@ -26,7 +26,7 @@ Each action in the catalog names an **act**, fixed in the signed charter:
 | `journal` | `journal/<step>.md` |
 | `message` to a named recipient | `outbox/<recipient>/<step>.txt` |
 | `write_file` with a named file | `files/<name>` |
-| `run` a fixed command | `runs/<step>.out`, its output, from a command run in the world with an empty environment and a 10 second limit |
+| `run` a fixed command | `runs/<step>.out`, its output. The command is confined by the operating system, with `sandbox-exec` on macOS and `bwrap` on Linux. It has no network, can write nothing anywhere, and can read only system files and the world. It runs with an empty environment and a 10 second limit. Where it cannot be confined, it does not run |
 | `none` | nothing |
 
 The model chooses the action and supplies at most a piece of text: what a reply, message or file will say. The text is bound into the fork commitment, so it cannot change between proposing and acting. Everything else, which file, which recipient, which command, is the charter's. An act runs only after its step is committed and stored, writes only in the world directory, and produces a receipt signed by the device with the hash of every byte it wrote. A stop between committing and acting is finished at the next start, and every act writes the same bytes if run twice.
@@ -65,7 +65,7 @@ mkdir -p run && openssl rand -hex 32 > run/seed && chmod 600 run/seed
 Start the enforcer in one terminal:
 
 ```bash
-./target/release/ethical-enforcer --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --device-seed run/seed --socket run/s
+./target/release/ethical-enforcer --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub --device-seed run/seed --socket run/s
 ```
 
 Run the scripted situations from another:
@@ -89,7 +89,7 @@ See where the chain stands:
 Audit the stored chain. Stop the enforcer and start it again and it resumes from the same place, after auditing the chain itself:
 
 ```bash
-./target/release/ethical-audit --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig
+./target/release/ethical-audit --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub
 ```
 
 Run the tests:
@@ -104,11 +104,17 @@ Check the proofs:
 (cd lean && lean BandInvariant.lean)
 ```
 
-The enforcer refuses a charter that has changed since it was signed. After an intended edit, the authority's separate step signs it again:
+The enforcer refuses a charter that has changed since it was signed, or one signed by any key but the authority whose public key it is given. The authority's key is random and lives outside the repository, readable by its owner alone. Only its public key, `scenarios/authority.pub`, is here. To make your own and sign with it:
 
 ```bash
-cargo run --release -p ethical-autonomy-adapter --bin ethical-sign-charter -- --charter scenarios/charter.json --out scenarios/charter.sig
+cargo run --release -p ethical-autonomy-adapter --bin ethical-sign-charter -- keygen --key ~/.config/irrefutable-labs/ethical-charter-authority.seed --public scenarios/authority.pub
 ```
+
+```bash
+cargo run --release -p ethical-autonomy-adapter --bin ethical-sign-charter -- sign --key ~/.config/irrefutable-labs/ethical-charter-authority.seed --charter scenarios/charter.json --out scenarios/charter.sig
+```
+
+Keep the seed off the machine that runs the AI.
 
 ## The CBFpy cross-check
 
@@ -143,7 +149,7 @@ Then give the agent any GGUF file. The recorded run used DeepSeek-R1 8B. The pro
 On macOS, the recorded run had internet access denied to both programs, the agent also denied any read of the seed or the store, and any write to the world. To do the same, start the enforcer under the first profile and the agent under the second:
 
 ```bash
-sandbox-exec -p '(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))' ./target/release/ethical-enforcer --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --device-seed run/seed --socket run/s
+sandbox-exec -p '(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))' ./target/release/ethical-enforcer --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub --device-seed run/seed --socket run/s
 ```
 
 ```bash
@@ -154,6 +160,30 @@ sandbox-exec -p "(version 1)(allow default)(deny network-outbound (remote ip))(d
 
 `.github/workflows/dsm-ethical-autonomy.yml` runs the Rust tests, formatting and Clippy, the CBFpy cross-check and the Lean proofs on every push and pull request.
 
+## Separate users
+
+Run as above, the enforcer and the AI share one OS user, and the enforcer says so at start: nothing but convention keeps the AI from the device seed, the store and the world. To make that a boundary, the enforcer runs as its own user and is told the AI's:
+
+```bash
+--agent-uid AGENT_UID
+```
+
+The socket is then open to connect to, but the enforcer asks the operating system who is on the other end and serves the agent's user alone. It refuses to start if that user is its own. Its seed, store and world belong to its own user, mode `700`, so the AI cannot read or write them by any route but the socket.
+
+Creating the user needs administrator rights, so it has not been run here. On Linux:
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin ethical-enforcer
+```
+
+On macOS, pick an unused ID below 500 for `UniqueID` and `PrimaryGroupID`:
+
+```bash
+sudo dscl . -create /Users/_ethicalenforcer UniqueID 451 && sudo dscl . -create /Users/_ethicalenforcer PrimaryGroupID 451 && sudo dscl . -create /Users/_ethicalenforcer UserShell /usr/bin/false && sudo dscl . -create /Users/_ethicalenforcer NFSHomeDirectory /var/empty
+```
+
+Then give that user its own directory, put the seed, store and world inside it, and start the enforcer as that user with `sudo -u`, passing `--agent-uid "$(id -u)"` for the user who runs the agent. Put the socket where the agent can reach it.
+
 ## Keys
 
-The charter's signing key and the test keys come from fixed seeds so runs reproduce byte for byte. **They protect nothing.** The programs hold only the authority's public key, but anyone with this source has its seed. The device seed is a file of your own. Whoever holds it can sign any state, so in a real deployment it would belong to a different OS user from the one running the model, which this prototype does not set up.
+The test keys come from fixed seeds so runs reproduce byte for byte, and they protect nothing. The charter's authority key does not: it is random, and only its public key is in the repository. The device seed is a file of your own, and the enforcer refuses one that anyone but its owner can read. Whoever holds the device seed can sign any state, which is why it belongs to the enforcer's own user.

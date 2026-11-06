@@ -17,6 +17,8 @@ mod config;
 mod enforcer;
 pub mod fork;
 pub mod hexser;
+pub mod keys;
+pub mod peer;
 pub mod protocol;
 pub mod report;
 pub mod server;
@@ -32,7 +34,3 @@ pub use enforcer::{
 pub use verify::{verify_genesis, verify_step, Refusal};
 
 pub type Hash = [u8; 32];
-
-/// The policy authority the shipped binaries trust. Only `ethical-sign-charter` signs for it.
-pub const TRUSTED_AUTHORITY_PUBLIC: &str =
-    "78f64c05dd973238409cc049902c7080e61617f9affd072e5163942e570d126ffe795631e2ffe8ed4bd0d0bc139cae70f94c3e7af2f789923b7d88321a943733";

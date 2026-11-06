@@ -52,6 +52,8 @@ impl Place {
             charter.to_str().expect("path"),
             "--signature",
             "scenarios/charter.sig",
+            "--authority",
+            "scenarios/authority.pub",
             "--device-seed",
             self.dir.join("seed").to_str().expect("path"),
             "--socket",
@@ -94,6 +96,8 @@ impl Place {
                 "scenarios/charter.json",
                 "--signature",
                 "scenarios/charter.sig",
+                "--authority",
+                "scenarios/authority.pub",
                 "--world",
                 self.world().to_str().expect("path"),
             ])
@@ -485,4 +489,141 @@ fn a_file_placed_in_the_world_by_anything_else_fails_the_audit() {
         "{}",
         text(&audit)
     );
+}
+
+fn own_uid() -> u32 {
+    ethical_autonomy_adapter::peer::own_uid()
+}
+
+/// In separate-user mode the operating system says who is connecting, and only the agent's
+/// user is served. The test runs as one user, so here that user is refused.
+#[test]
+fn in_separate_user_mode_any_other_user_is_refused() {
+    let place = Place::new("agent-user");
+    let other = own_uid() + 4242;
+    let _ = std::fs::remove_file(place.socket());
+    let child = place
+        .enforcer(Path::new("scenarios/charter.json"))
+        .args(["--agent-uid", &other.to_string()])
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start");
+    let _e = Running(child);
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !place.socket().exists() {
+        assert!(Instant::now() < deadline, "the enforcer did not start");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let out = place.agent(&["--status"]);
+    assert!(!out.status.success());
+    assert!(
+        text(&out).contains(&format!("serves only user {other}, not user {}", own_uid())),
+        "{}",
+        text(&out)
+    );
+}
+
+#[test]
+fn the_enforcer_will_not_serve_its_own_user_as_the_agent() {
+    let place = Place::new("same-user");
+    let out = place
+        .enforcer(Path::new("scenarios/charter.json"))
+        .args(["--agent-uid", &own_uid().to_string()])
+        .output()
+        .expect("run");
+    assert!(!out.status.success());
+    assert!(
+        text(&out).contains("must not be the enforcer's own"),
+        "{}",
+        text(&out)
+    );
+}
+
+#[test]
+fn a_charter_signed_by_another_authority_is_refused() {
+    let place = Place::new("other-authority");
+    let key = place.dir.join("other.seed");
+    let public = place.dir.join("other.pub");
+    let made = Command::new(env!("CARGO_BIN_EXE_ethical-sign-charter"))
+        .args([
+            "keygen",
+            "--key",
+            key.to_str().unwrap(),
+            "--public",
+            public.to_str().unwrap(),
+        ])
+        .output()
+        .expect("keygen");
+    assert!(made.status.success(), "{}", text(&made));
+    let out = place
+        .enforcer(Path::new("scenarios/charter.json"))
+        .args(["--authority", public.to_str().unwrap()])
+        .output()
+        .expect("run");
+    assert!(!out.status.success());
+    assert!(
+        text(&out).contains("trusted authority's signature"),
+        "{}",
+        text(&out)
+    );
+}
+
+#[test]
+fn the_signing_tool_keeps_its_key_to_its_owner() {
+    let place = Place::new("signing");
+    let key = place.dir.join("authority.seed");
+    let public = place.dir.join("authority.pub");
+    let keygen = |k: &Path| {
+        Command::new(env!("CARGO_BIN_EXE_ethical-sign-charter"))
+            .args([
+                "keygen",
+                "--key",
+                k.to_str().unwrap(),
+                "--public",
+                public.to_str().unwrap(),
+            ])
+            .output()
+            .expect("keygen")
+    };
+    assert!(keygen(&key).status.success());
+    let mode = std::fs::metadata(&key).expect("key").permissions().mode();
+    assert_eq!(mode & 0o077, 0, "mode {:o}", mode & 0o777);
+    assert!(
+        !keygen(&key).status.success(),
+        "an existing key must not be replaced"
+    );
+
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644)).expect("mode");
+    let sign = Command::new(env!("CARGO_BIN_EXE_ethical-sign-charter"))
+        .current_dir(root())
+        .args([
+            "sign",
+            "--key",
+            key.to_str().unwrap(),
+            "--charter",
+            "scenarios/charter.json",
+            "--out",
+            place.dir.join("sig").to_str().unwrap(),
+        ])
+        .output()
+        .expect("sign");
+    assert!(!sign.status.success());
+    assert!(
+        text(&sign).contains("must be owner-only"),
+        "{}",
+        text(&sign)
+    );
+}
+
+/// The shipped charter is not signed by any key in the source: no seed for it is in the repo.
+#[test]
+fn no_authority_seed_ships_with_the_source() {
+    let public = std::fs::read_to_string(root().join("scenarios/authority.pub")).expect("pub");
+    for seed in [[0xA1u8; 32], [1; 32], [0; 32]] {
+        let k = ethical_autonomy_adapter::keypair_from_seed(&seed).expect("key");
+        assert_ne!(
+            ethical_autonomy_adapter::hexser::to_hex(&k.public),
+            public.trim()
+        );
+    }
 }
