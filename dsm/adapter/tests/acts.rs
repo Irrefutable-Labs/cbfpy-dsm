@@ -4,7 +4,9 @@
 mod common;
 
 use common::*;
-use ethical_autonomy_adapter::act::{check_world, perform, run_command, sweep_partial, Act};
+use ethical_autonomy_adapter::act::{
+    check_world, confinement_works, perform, run_command, sweep_partial, Act,
+};
 use ethical_autonomy_adapter::fork::Outcome;
 use ethical_autonomy_adapter::protocol::{Request, Response};
 use ethical_autonomy_adapter::server::Service;
@@ -336,7 +338,10 @@ fn commit_text(e: &mut Enforcer, action: &str, text: &str) -> ethical_autonomy_a
     e.commit(&futures[0]).expect("commit")
 }
 
+/// Each denial below would pass vacuously if the sandbox never started, so each first proves
+/// that it does.
 fn run(world: &Path, argv: &[&str]) -> String {
+    confinement_works(world).expect("the sandbox must start, or these tests prove nothing");
     let argv: Vec<String> = argv.iter().map(|a| a.to_string()).collect();
     String::from_utf8_lossy(&run_command(world, &argv, Duration::from_secs(10)).expect("run"))
         .to_string()
@@ -509,4 +514,9 @@ fn a_failed_act_halts_commits_until_a_restart_finishes_it() {
         0
     );
     assert_eq!(check_world(&world, &after.receipts).expect("clean"), 2);
+}
+
+#[test]
+fn the_sandbox_starts_on_this_system() {
+    confinement_works(&place("probe")).expect("the command sandbox must start here");
 }

@@ -262,6 +262,26 @@ fn confined(_world: &Path, _argv: &[String]) -> Result<Command, AdapterError> {
     ))
 }
 
+/// Whether the sandbox itself starts here. A sandbox that cannot start would make every command
+/// look like it ran and failed, so the enforcer checks this first and refuses outright instead.
+pub fn confinement_works(world: &Path) -> Result<(), AdapterError> {
+    let out = confined(world, &["/usr/bin/true".to_string()])?
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(io)?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(AdapterError::Effect(format!(
+            "the command sandbox could not start, so no command runs: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )))
+    }
+}
+
 /// Run `argv` confined to `world`, with an empty environment, for at most `limit`, keeping at
 /// most [`MAX_OUTPUT`] bytes of what it prints. A confined command can write nothing, so running
 /// it again after a stop has no effect beyond its own output.
@@ -270,6 +290,7 @@ pub fn run_command(
     argv: &[String],
     limit: Duration,
 ) -> Result<Vec<u8>, AdapterError> {
+    confinement_works(world)?;
     let mut child = confined(world, argv)?
         .env_clear()
         .stdin(Stdio::null())

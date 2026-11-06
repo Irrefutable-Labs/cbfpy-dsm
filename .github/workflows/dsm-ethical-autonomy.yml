@@ -28,6 +28,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: dsm
+      - name: Let bubblewrap make its namespaces
+        # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, which stops
+        # bwrap from starting. The command-sandbox tests need it to start.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Tests
         run: cargo test --release --locked --no-fail-fast
 
