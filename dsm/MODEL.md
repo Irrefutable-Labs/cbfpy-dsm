@@ -66,7 +66,7 @@ The policy lists prohibited tags. A measurement carrying one is refused whatever
 
 Each step's limit is measured from the fixed center, never from the previous step. A chain starts at the center, so `x ≤ T` holds at the start. If `x ≤ T`, then `x' ≤ x + allowed(x) ≤ T`. A crossing lands within the far side's allowance from the center, so it stays inside that side's stop. By induction, no walk of any length or step size passes `T`. With coupling the stop varies from step to step, but every effective stop is at most `H`, so no walk passes `H`.
 
-`lean/BandInvariant.lean` proves these on a model of the rule, and the restoration bound for a fixed threshold. It is not linked to the Rust code. See `REPORT.md` for exactly what that covers.
+`lean/BandInvariant.lean` proves these on a model of the rule, crossing and coupling together, and the restoration bound for a fixed threshold. It is not linked to the Rust code. See `REPORT.md` for exactly what that covers.
 
 ## Relationship to control barrier functions
 

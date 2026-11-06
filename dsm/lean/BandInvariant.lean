@@ -5,7 +5,9 @@
   Rust engine, whose correspondence rests on its tests. Run with `lean BandInvariant.lean`.
 
   `no_escape` and `no_escape_coupled` are one side with no crossing. `no_escape_two_sided` adds
-  crossing the center, with a separate stop per side. `restoration` assumes a fixed threshold.
+  crossing the center, with a separate stop per side. `no_escape_two_sided_coupled` has both at
+  once: crossings, and stops that move every step under coupling. `restoration` assumes a fixed
+  threshold.
 -/
 
 namespace Band
@@ -92,6 +94,34 @@ theorem no_escape_two_sided (stopOf : Bool → Nat) (side : Nat → Bool) (mag c
       unfold allow at hk
       split at hk <;> omega
 
+/-- Crossing and coupling together: each side has its own hard limit, the stop on each side may
+    change at every step as coupling moves it, and the walk may stay on its side or cross. As long
+    as every effective stop is inside its side's hard limit, which clamping guarantees, no walk of
+    any length leaves the hard limit of the side it is on. -/
+theorem no_escape_two_sided_coupled (hardOf : Bool → Nat) (stopAt : Nat → Bool → Nat)
+    (side : Nat → Bool) (mag curve : Nat → Nat)
+    (h0 : mag 0 ≤ hardOf (side 0))
+    (hstop : ∀ k s, stopAt k s ≤ hardOf s)
+    (hstay : ∀ k, side (k + 1) = side k →
+      mag (k + 1) ≤ mag k + allow (stopAt k (side k)) (mag k) (curve k))
+    (hcross : ∀ k, side (k + 1) ≠ side k →
+      mag (k + 1) ≤ allow (stopAt k (side (k + 1))) 0 (curve k)) :
+    ∀ k, mag k ≤ hardOf (side k) := by
+  intro k
+  induction k with
+  | zero => exact h0
+  | succ k ih =>
+    by_cases hs : side (k + 1) = side k
+    · have hk := hstay k hs
+      have hb := hstop k (side k)
+      rw [hs]
+      unfold allow at hk
+      split at hk <;> omega
+    · have hk := hcross k hs
+      have hb := hstop k (side (k + 1))
+      unfold allow at hk
+      split at hk <;> omega
+
 /-- Past the restoring threshold, each accepted step gives up at least `p`, and a state at or
     under the threshold stays there. So a band returns within a bounded number of steps. -/
 theorem restoration (r p : Nat) (xs : Nat → Nat)
@@ -116,4 +146,5 @@ end Band
 #print axioms Band.no_escape
 #print axioms Band.no_escape_two_sided
 #print axioms Band.no_escape_coupled
+#print axioms Band.no_escape_two_sided_coupled
 #print axioms Band.restoration

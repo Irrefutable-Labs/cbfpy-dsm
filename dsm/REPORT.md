@@ -47,9 +47,10 @@ The audit verified every step from its parent alone and replayed it through DSM'
 - No walk of any length passes the stop on one side, for any curve values.
 - With a separate stop per side and crossings allowed, no walk leaves the stop of the side it is on.
 - With a stop that varies per step, as under coupling, no walk passes the hard limit.
+- With both at once, crossings and stops that move every step on each side, no walk leaves the hard limit of the side it is on.
 - Past a fixed restoring threshold, deviation falls by the required progress each step.
 
-**These are proofs about a model of the rule, not about the Rust code.** Nothing machine-links the two, so correspondence rests on the tests. The crossing theorem and the coupled theorem are separate.
+**These are proofs about a model of the rule, not about the Rust code.** Nothing machine-links the two, so correspondence rests on the tests.
 
 ### Mechanically checked
 
