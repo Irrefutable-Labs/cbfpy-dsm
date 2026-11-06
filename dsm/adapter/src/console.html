@@ -61,7 +61,7 @@ section.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.
 .pill.eligible { background: var(--ok-soft); color: var(--ok); }
 .pill.refused, .pill.malformed { background: var(--bad-soft); color: var(--bad); }
 .pill.unmeasured { background: var(--warn-soft); color: var(--warn); }
-.pill.undisclosed { background: var(--bad-soft); color: var(--bad); }
+.pill.undisclosed, .pill.deceptive { background: var(--bad-soft); color: var(--bad); }
 .decl { margin-top: 6px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; font-size: 12.5px; }
 .decl dt { color: var(--muted); }
 .decl dd { margin: 0; overflow-wrap: anywhere; }
@@ -140,7 +140,7 @@ button:hover { border-color: var(--accent); }
   <div>
     <section class="card">
       <h2>Steps</h2>
-      <p class="note">Newest first. Open a step to see every candidate the AI put forward from that state, with what it declared about each. A candidate that would affect the world without disclosing it in full is refused as undisclosed. Point at a candidate to see on the bands where it would have moved.</p>
+      <p class="note">Newest first. Open a step to see every candidate the AI put forward from that state, with what it declared about each. A candidate that would affect the world without disclosing it in full is refused as undisclosed; one whose words contradict the fact register, overstate what is uncertain, leave out what it must tell, or say what it does not declare is refused as deceptive. Point at a candidate to see on the bands where it would have moved.</p>
       <div id="pending"></div>
       <div id="steps"></div>
     </section>
@@ -208,7 +208,9 @@ function renderCharter() {
     <dt>History</dt><dd>${c.history.map(esc).join("<br>")}</dd>
     <dt>Policy</dt><dd class="mono" title="${esc(c.policy_hash)}">${short(c.policy_hash)}</dd>
     <dt>Foundation</dt><dd><span class="mono" title="${esc(c.foundation)}">${short(c.foundation)}</span> <span class="meta">fixed at genesis: the prohibitions and every hard limit</span></dd>
-    <dt>Prohibited</dt><dd>${c.prohibited.map(p => `<span class="chip warn">${esc(label(p))}</span>`).join("") || "none"}</dd>`;
+    <dt>Prohibited</dt><dd>${c.prohibited.map(p => `<span class="chip warn">${esc(label(p))}</span>`).join("") || "none"}</dd>
+    <dt>Facts</dt><dd>${c.facts.map(f => `<div><span class="chip ${f.holds ? "" : "warn"}" title="${esc(f.id)}">${f.holds ? "true" : "false"}${f.certainty === "uncertain" ? ", uncertain" : ""}</span> ${esc(f.statement)}</div>`).join("") || "none registered"}</dd>
+    <dt>Overclaims</dt><dd>${c.overclaim.map(esc).join(", ") || "none"}</dd>`;
   const st = data.states[+$("scrub").value];
   const fired = new Set(st ? st.fired_rules : []);
   $("rules").innerHTML = c.rules.map((r, i) => {
@@ -282,6 +284,7 @@ function candidate(c, chosen, stepIdx, k) {
       <dt>Affects</dt><dd>${esc(c.declaration.affected.join(", ")) || "<i>no one named</i>"}</dd>
       <dt>Does</dt><dd>${esc(c.declaration.effects.join(", ")) || "<i>nothing named</i>"}</dd>
       <dt>Discloses</dt><dd>${esc(c.declaration.consequences.join(", ")) || "<i>no consequence</i>"}</dd>
+      <dt>Claims</dt><dd>${(c.declaration.assertions || []).map(a => `${a.stance === "affirm" ? "says" : "denies"} ${esc(label(a.fact))} (${esc(a.certainty)})`).join("; ") || "<i>no factual claim</i>"}</dd>
     </dl>` : ""}
     ${c.movements.length ? `<div class="moves">${moves(c)}</div>` : ""}
     ${c.reasons.length ? `<ul>${c.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}

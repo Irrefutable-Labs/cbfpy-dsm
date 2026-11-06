@@ -20,6 +20,8 @@ pub enum Outcome {
     Malformed,
     /// It would affect the world without disclosing what it is: see [`crate::disclosure`].
     Undisclosed,
+    /// Its words deceive, as [`crate::honesty`] defines it.
+    Deceptive,
 }
 
 /// One branch of a fork, as committed.
@@ -48,6 +50,7 @@ impl CandidateRecord {
             Outcome::Unmeasured => 3,
             Outcome::Malformed => 4,
             Outcome::Undisclosed => 5,
+            Outcome::Deceptive => 6,
         }];
         let evaluation = self
             .evaluation_commit
@@ -98,10 +101,14 @@ pub fn record_candidate(
             proposal.declaration.as_ref(),
         )
     });
+    let deceptive = row.as_ref().map_or(vec![], |r| {
+        crate::honesty::check_proposal(charter, r, proposal)
+    });
     let outcome = match &evaluation {
         None => Outcome::Unmeasured,
         Some(_) if !fits => Outcome::Malformed,
         Some(_) if !hidden.is_empty() => Outcome::Undisclosed,
+        Some(_) if !deceptive.is_empty() => Outcome::Deceptive,
         Some(e) if e.is_eligible() => Outcome::Eligible,
         Some(_) => Outcome::Refused,
     };

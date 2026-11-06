@@ -85,6 +85,7 @@ pub fn row(action: &str, displacement: [i64; 6], tags: &[&str]) -> CatalogRow {
         tags: tags.iter().map(|t| t.to_string()).collect(),
         act: ethical_autonomy_adapter::act::Act::None,
         material: vec![],
+        must_assert: vec![],
     }
 }
 
@@ -101,6 +102,7 @@ pub fn catalog() -> Catalog {
             row("cause_harm", [0, 0, 0, 0, 0, 0], &["irreversible_harm"]),
             row("mislabelled_harm", [0, 0, 0, 0, 0, 0], &[]),
         ],
+        ..Catalog::default()
     }
 }
 
@@ -184,12 +186,24 @@ pub fn no_lies() -> Lies {
 
 /// A fully signed step made with the device key, never passing through the enforcer.
 pub fn forge(parent: &AttestedState, action: &str, lies: Lies) -> StepRecord {
+    forge_with(&charter(), parent, propose(action), lies)
+}
+
+/// [`forge`], under any charter and for any proposal.
+pub fn forge_with(
+    charter: &SignedCharter,
+    parent: &AttestedState,
+    proposal: Proposal,
+    lies: Lies,
+) -> StepRecord {
     let device = &keys().device;
-    let charter = charter();
     let policy = charter.policy_hash();
     let catalog = charter.catalog_hash();
-    let proposal = propose(action);
-    let row = charter.catalog.row(action).expect("a catalog row").clone();
+    let row = charter
+        .catalog
+        .row(&proposal.action)
+        .expect("a catalog row")
+        .clone();
     let branch = lies.branch.unwrap_or_else(|| {
         commit::branch_commitment(
             &parent.tip,
@@ -205,7 +219,7 @@ pub fn forge(parent: &AttestedState, action: &str, lies: Lies) -> StepRecord {
     let evaluation_commit = lies
         .evaluation_commit
         .unwrap_or_else(|| commit::evaluation_commit(&evaluation.canonical_bytes()));
-    let (honest, _) = record_candidate(&charter, &parent.tip, &parent.positions, &proposal);
+    let (honest, _) = record_candidate(charter, &parent.tip, &parent.positions, &proposal);
     let fork = lies.fork.unwrap_or_else(|| vec![honest]);
     let chosen = lies.chosen.unwrap_or(0);
     let root = fork_root(&fork);

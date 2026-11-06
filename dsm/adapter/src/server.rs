@@ -113,8 +113,10 @@ impl Service {
                         effects: crate::disclosure::described(&r.act).0,
                         affected: crate::disclosure::described(&r.act).1,
                         material: r.material.clone(),
+                        must_assert: r.must_assert.clone(),
                     })
                     .collect(),
+                facts: self.enforcer.charter().catalog.facts.clone(),
             },
             Request::Status => {
                 let state = self.enforcer.state();
@@ -177,7 +179,8 @@ impl Service {
                         }
                         FutureStatus::Unmeasured
                         | FutureStatus::Malformed
-                        | FutureStatus::Undisclosed(_) => None,
+                        | FutureStatus::Undisclosed(_)
+                        | FutureStatus::Deceptive(_) => None,
                     })
                     .unwrap_or_default();
                 let response = Response::Forked {

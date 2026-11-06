@@ -42,6 +42,9 @@ pub struct CatalogRow {
     /// The material consequences a declaration of this action must disclose, by name.
     #[serde(default)]
     pub material: Vec<String>,
+    /// Facts from the register this action's words must tell people, by id.
+    #[serde(default)]
+    pub must_assert: Vec<String>,
 }
 
 impl CatalogRow {
@@ -60,6 +63,13 @@ impl CatalogRow {
                     .map(|m| m.as_bytes())
                     .collect::<Vec<_>>(),
             ),
+            &commit::frame(
+                &self
+                    .must_assert
+                    .iter()
+                    .map(|m| m.as_bytes())
+                    .collect::<Vec<_>>(),
+            ),
         ])
     }
 
@@ -71,9 +81,13 @@ impl CatalogRow {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Catalog {
     pub rows: Vec<CatalogRow>,
+    /// The register of verified facts the AI's words are held to.
+    pub facts: Vec<crate::honesty::Fact>,
+    /// Words that claim certainty, refused about anything the register marks uncertain.
+    pub overclaim: Vec<String>,
 }
 
 const MAX_ROW_TEXT: usize = 4_096;
@@ -86,10 +100,35 @@ impl Catalog {
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let rows: Vec<Vec<u8>> = self.rows.iter().map(CatalogRow::canonical_bytes).collect();
         let parts: Vec<&[u8]> = rows.iter().map(Vec::as_slice).collect();
-        commit::frame(&parts)
+        let facts: Vec<Vec<u8>> = self
+            .facts
+            .iter()
+            .map(crate::honesty::Fact::canonical_bytes)
+            .collect();
+        let fact_parts: Vec<&[u8]> = facts.iter().map(Vec::as_slice).collect();
+        let words: Vec<&[u8]> = self.overclaim.iter().map(|w| w.as_bytes()).collect();
+        commit::frame(&[
+            &commit::frame(&parts),
+            &commit::frame(&fact_parts),
+            &commit::frame(&words),
+        ])
     }
 
     fn validate(&self, dimensions: usize) -> bool {
+        let mut ids = std::collections::BTreeSet::new();
+        let facts_ok = self.facts.len() <= 256
+            && self
+                .facts
+                .iter()
+                .all(|f| f.is_well_formed() && ids.insert(f.id.as_str()))
+            && self.overclaim.len() <= 64
+            && self
+                .overclaim
+                .iter()
+                .all(|w| !crate::honesty::normalise(w).is_empty());
+        if !facts_ok {
+            return false;
+        }
         let mut seen = std::collections::BTreeSet::new();
         self.rows.iter().all(|r| {
             seen.insert(r.action.as_str())
@@ -99,6 +138,7 @@ impl Catalog {
                 && r.displacement.len() == dimensions
                 && r.tags.iter().all(|t| t.len() <= MAX_ROW_TEXT)
                 && r.act.is_well_formed()
+                && r.must_assert.iter().all(|m| ids.contains(m.as_str()))
                 && r.material.len() <= crate::disclosure::MAX_ITEMS
                 && r.material
                     .iter()

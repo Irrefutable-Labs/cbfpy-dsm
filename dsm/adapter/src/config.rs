@@ -11,6 +11,10 @@ use std::collections::BTreeMap;
 struct ConfigFile {
     policy: PolicyFile,
     catalog: Vec<RowFile>,
+    #[serde(default)]
+    facts: Vec<crate::honesty::Fact>,
+    #[serde(default)]
+    overclaim_markers: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -112,6 +116,8 @@ struct RowFile {
     act: crate::act::Act,
     #[serde(default)]
     material: Vec<String>,
+    #[serde(default)]
+    must_assert: Vec<String>,
 }
 
 fn no_repeated_names<'de, D>(deserializer: D) -> Result<BTreeMap<String, i64>, D::Error>
@@ -232,6 +238,7 @@ pub fn parse_charter_config(text: &str) -> Result<(Policy, Catalog), AdapterErro
             tags: r.tags,
             act: r.act,
             material: r.material,
+            must_assert: r.must_assert,
         });
     }
     Ok((
@@ -241,7 +248,11 @@ pub fn parse_charter_config(text: &str) -> Result<(Policy, Catalog), AdapterErro
             rules,
             prohibited_tags: file.policy.prohibited_tags,
         },
-        Catalog { rows },
+        Catalog {
+            rows,
+            facts: file.facts,
+            overclaim: file.overclaim_markers,
+        },
     ))
 }
 
@@ -315,7 +326,7 @@ pub fn charter_config_text(policy: &Policy, catalog: &Catalog) -> String {
                 .collect();
             json!({
                 "action": r.action, "description": r.description, "displacement": displacement,
-                "tags": r.tags, "act": r.act, "material": r.material,
+                "tags": r.tags, "act": r.act, "material": r.material, "must_assert": r.must_assert,
             })
         })
         .collect();
@@ -323,6 +334,8 @@ pub fn charter_config_text(policy: &Policy, catalog: &Catalog) -> String {
         "policy": {"version": policy.version, "prohibited_tags": policy.prohibited_tags,
                    "bands": bands, "rules": rules},
         "catalog": rows,
+        "facts": catalog.facts,
+        "overclaim_markers": catalog.overclaim,
     })
     .to_string()
 }

@@ -158,9 +158,12 @@ fn the_scripted_run_shows_every_mechanism() {
         "enforces the measurements it was given",
         "holds no key and no charter",
         "never shown a measurement",
-        "with all 5 candidates in the fork",
+        "with all 8 candidates in the fork",
         "it does not disclose that it affects person",
         "it does not disclose a material consequence: risk_accepted",
+        "it asserts what the register shows false",
+        "it says \"definitely\" about something the register marks uncertain",
+        "it asserts something without declaring it",
         "declares its purpose",
     ] {
         assert!(out.contains(expected), "missing: {expected}\n{out}");

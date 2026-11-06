@@ -33,6 +33,9 @@ pub struct Declaration {
     pub effects: Vec<String>,
     /// The material consequences the charter names for this action, by name.
     pub consequences: Vec<String>,
+    /// What its words claim about facts in the register: see [`crate::honesty`].
+    #[serde(default)]
+    pub assertions: Vec<crate::honesty::Assertion>,
 }
 
 fn list(items: &[String]) -> Vec<u8> {
@@ -48,6 +51,16 @@ impl Declaration {
             &list(&self.affected),
             &list(&self.effects),
             &list(&self.consequences),
+            &commit::frame(
+                &self
+                    .assertions
+                    .iter()
+                    .map(crate::honesty::Assertion::canonical_bytes)
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(Vec::as_slice)
+                    .collect::<Vec<_>>(),
+            ),
         ])
     }
 
@@ -59,6 +72,8 @@ impl Declaration {
             &self.consequences,
         ];
         self.purpose.len() <= MAX_ITEM
+            && self.assertions.len() <= MAX_ITEMS
+            && self.assertions.iter().all(|a| a.fact.len() <= MAX_ITEM)
             && lists
                 .iter()
                 .all(|l| l.len() <= MAX_ITEMS && l.iter().all(|i| i.len() <= MAX_ITEM))

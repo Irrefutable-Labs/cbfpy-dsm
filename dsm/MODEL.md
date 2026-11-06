@@ -136,6 +136,30 @@ A proposal carries a declaration of purpose, information, affected parties, effe
 
 The declaration is part of the proposal commitment, so it is bound into the branch commitment, the fork root and the decision, and the verifier works the check out again. What this does not establish is that the stated purpose is the AI's true one, or that an information source it names was really what it relied on.
 
+## Deception
+
+The charter's register is a list of facts, each with an id, whether it holds, whether it is established or uncertain, and two sets of phrases: `A(f)` asserts the fact and `D(f)` denies it. A row may name the facts `M` its words must tell, and the charter lists overclaiming words `O`.
+
+For an act that carries a text `t`, let `n(t)` be `t` lowercased, with every run of characters that are not letters or digits replaced by one space. The claims the words make are:
+
+```
+C(t) = { (f, affirm) : a phrase of A(f) occurs in n(t) as whole words }
+     ∪ { (f, deny)   : a phrase of D(f) occurs in n(t) as whole words }
+```
+
+Where two occurrences overlap, the longer one is kept. The declaration gives a set `S` of claims `(f, s, c)`, with `c` one of certain, likely or unsure. Let `true(f)` be affirm if `f` holds and deny if not. The words are **deceptive** if any of these holds:
+
+```
+1. some (f, s, c) in S has s ≠ true(f), or f is not in the register
+2. some (f, s, certain) in S has f uncertain
+3. some m in M has no (m, true(m), c) in S
+4. some (f, s) in C(t) has no (f, s, c) in S,
+   or some (f, s, c) in S has (f, s) not in C(t)
+5. a word of O occurs in n(t), and some (f, s) in C(t) has f uncertain
+```
+
+A deceptive candidate cannot be eligible, and the verifier works the check out again from the step's own row, proposal and charter. By 3 and 4 together, every fact an action must tell is said in the register's own words, the right way round. What `C` cannot see is a claim in words the register does not list. Coverage grows only as the authority adds phrases, and the AI cannot change the register.
+
 ## Foundations and updates
 
 A charter's **foundation** is its prohibited tags and every band's name and hard limits. Its hash is computed from the policy alone. An **update** carries a whole new charter, signed by the authority, and is accepted only if:

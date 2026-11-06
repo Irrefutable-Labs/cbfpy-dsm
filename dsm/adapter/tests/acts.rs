@@ -36,6 +36,7 @@ fn said(action: &str, text: &str) -> Proposal {
             affected,
             effects,
             consequences: row.material.clone(),
+            assertions: vec![],
         })
     });
     Proposal {

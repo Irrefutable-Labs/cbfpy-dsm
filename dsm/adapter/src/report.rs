@@ -136,6 +136,18 @@ pub fn report(futures: &[Future], policy: &Policy) -> Vec<FutureReport> {
                 movements: movements(e, policy),
                 purpose: f.proposal.declaration.as_ref().map(|d| d.purpose.clone()),
             },
+            FutureStatus::Deceptive(why) => FutureReport {
+                index: f.index,
+                action: f.proposal.action.clone(),
+                outcome: Outcome::Deceptive,
+                reasons: why.clone(),
+                guidance: why
+                    .iter()
+                    .map(|w| format!("Say only what is true, only as surely as it is known, and declare it: {w}."))
+                    .collect(),
+                movements: vec![],
+                purpose: f.proposal.declaration.as_ref().map(|d| d.purpose.clone()),
+            },
             FutureStatus::Undisclosed(why) => FutureReport {
                 index: f.index,
                 action: f.proposal.action.clone(),

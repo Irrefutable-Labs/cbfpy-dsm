@@ -37,6 +37,8 @@ pub struct MenuItem {
     pub affected: Vec<String>,
     /// The material consequences a declaration of it must disclose.
     pub material: Vec<String>,
+    /// Facts from the register its words must tell people, by id.
+    pub must_assert: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +53,8 @@ pub struct Position {
 pub enum Response {
     Menu {
         actions: Vec<MenuItem>,
+        /// The register of verified facts the words are held to, as the charter signs it.
+        facts: Vec<crate::honesty::Fact>,
     },
     Status {
         sequence: u64,

@@ -90,7 +90,7 @@ See where the chain stands:
 Audit the stored chain. `--device` is the device's public key, which the enforcer writes beside its store; in a real deployment, give the audit a copy you trust rather than the store's own. Stop the enforcer and start it again and it resumes from the same place, after auditing the chain itself:
 
 ```bash
-./target/release/ethical-audit --store run/store --world run/world --device run/store/device.pub --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub
+./target/release/ethical-audit --store run/store --world run/world --device run/store/device.pub --authority scenarios/authority.pub
 ```
 
 Run the tests:
@@ -192,6 +192,23 @@ A candidate fails as **undisclosed**, and cannot commit, if any of these holds:
 The declaration is bound into the fork with everything else, so it cannot change afterwards, and it stays on the chain for the people who oversee the AI. The console shows it beside every candidate.
 
 This enforces that the AI declares, and that what it declares matches what the action does. It does not establish that the purpose it states is its real one.
+
+## Nothing false
+
+The charter carries a **register of verified facts**, signed by the charter authority with everything else. Each fact has a statement, whether it holds, whether it is established or uncertain, and the phrases that assert or deny it. The charter also lists **overclaiming words**, such as "definitely", and each action can name facts its words **must tell**. A declaration lists every registered fact its words assert or deny, and how sure it is.
+
+A candidate whose act carries words fails as **deceptive**, and cannot commit, if any of these holds:
+
+- it asserts what the register shows false, or denies what it shows true;
+- it declares certainty about a fact the register marks uncertain;
+- its words use an overclaiming word while making a claim the register marks uncertain;
+- it leaves out a fact its action must tell, or tells it the wrong way round;
+- its words make a registered claim it does not declare, or it declares one its words do not make;
+- it declares a claim about a fact the register does not hold.
+
+Words are matched after setting aside case and punctuation, whole words only, and the longer phrase wins where two overlap, so "not safe to test it live" is a denial, not the claim inside it. The check is worked out again by the verifier, and the claims are bound into the fork with the rest of the declaration.
+
+What it catches is bounded by the register. A false claim in words the register has no phrase for is not recognised at all. A fact the action must tell, though, must be declared and said in the register's own words, so the required ones cannot be paraphrased away. The register is part of the charter, so only the authority can grow it, and the AI cannot change it.
 
 ## Watching it
 

@@ -133,6 +133,7 @@ pub fn verify_step(
             step.proposal.declaration.as_ref(),
         )
         .is_empty()
+        || !crate::honesty::check_proposal(charter, &step.row, &step.proposal).is_empty()
     {
         return Err(Refusal::NotEligible);
     }

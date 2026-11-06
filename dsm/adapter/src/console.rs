@@ -54,6 +54,10 @@ pub struct CharterView {
     /// The hash of what no update may change: the prohibited acts and every hard limit.
     pub foundation: String,
     pub history: Vec<String>,
+    /// The register of verified facts the AI's words are held to.
+    pub facts: Vec<crate::honesty::Fact>,
+    /// Words that claim certainty, refused about anything uncertain.
+    pub overclaim: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -248,6 +252,12 @@ fn candidate_view(
             }),
             vec![],
         ),
+        (Outcome::Deceptive, _) => (
+            worked.row.as_ref().map_or(vec![], |row| {
+                crate::honesty::check_proposal(charter, row, &r.proposal)
+            }),
+            vec![],
+        ),
         (Outcome::Malformed, _) => (
             vec!["its text is missing, too long or unprintable for what it does".to_string()],
             vec![],
@@ -346,6 +356,8 @@ fn charter_view(charter: &SignedCharter, history: Vec<String>) -> CharterView {
         prohibited: policy.prohibited_tags.clone(),
         foundation: to_hex(&crate::update::foundation_hash(policy)),
         history,
+        facts: charter.catalog.facts.clone(),
+        overclaim: charter.catalog.overclaim.clone(),
     }
 }
 

@@ -19,6 +19,7 @@ pub mod disclosure;
 mod enforcer;
 pub mod fork;
 pub mod hexser;
+pub mod honesty;
 pub mod keys;
 pub mod peer;
 pub mod protocol;

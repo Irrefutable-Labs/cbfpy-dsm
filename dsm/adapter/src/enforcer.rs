@@ -98,6 +98,8 @@ pub enum FutureStatus {
     Malformed,
     /// It does not disclose what it is: the reasons why.
     Undisclosed(Vec<String>),
+    /// Its words deceive: the reasons why.
+    Deceptive(Vec<String>),
 }
 
 /// One pre-commit branch from the parent, carrying the whole fork it belongs to. It is a claim
@@ -488,6 +490,15 @@ impl Enforcer {
                             })
                             .unwrap_or_default(),
                     ),
+                    (Outcome::Deceptive, _) => FutureStatus::Deceptive(
+                        record
+                            .row
+                            .as_ref()
+                            .map(|r| {
+                                crate::honesty::check_proposal(&self.charter, r, &record.proposal)
+                            })
+                            .unwrap_or_default(),
+                    ),
                     (_, Some(e)) => FutureStatus::Rejected(e),
                     (_, None) => FutureStatus::Unmeasured,
                 },
@@ -763,11 +774,14 @@ pub fn audit_chain(
                 verify_step(&state, step, &charter, trusted_authority, device_public).map_err(
                     |r| AdapterError::BadStore(format!("link {} does not verify: {r:?}", n + 1)),
                 )?;
-                let count = |o: Outcome| step.fork.iter().filter(|r| r.outcome == o).count();
+                let count =
+                    |f: &dyn Fn(Outcome) -> bool| step.fork.iter().filter(|r| f(r.outcome)).count();
+                // Refused for any reason: the bands, a prohibition, a concealment, deceptive
+                // words, or a text that does not fit. Unmeasured is counted on its own.
                 forks.push((
                     step.fork.len(),
-                    count(Outcome::Refused),
-                    count(Outcome::Unmeasured),
+                    count(&|o| o != Outcome::Eligible && o != Outcome::Unmeasured),
+                    count(&|o| o == Outcome::Unmeasured),
                 ));
                 charters.push(charter.clone());
                 (step.decision_commit, step.decision_signature.clone())

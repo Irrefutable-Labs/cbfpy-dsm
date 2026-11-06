@@ -25,6 +25,7 @@ fn honest() -> Declaration {
         affected: vec!["user".to_string()],
         effects: vec!["message:user".to_string()],
         consequences: vec!["pressure_on_person".to_string()],
+        assertions: vec![],
     }
 }
 
