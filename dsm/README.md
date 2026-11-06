@@ -12,6 +12,7 @@ Three programs, and the model never shares a process with the keys.
 |---|---|---|
 | `ethical-enforcer` | The device key, the chain on disk, the real DSM head, and the world directory | Serves a Unix socket only its owner can open. Forks proposals, commits the chosen one, writes each step before installing it, then carries out the step's act in the world and signs a receipt for it. Resumes a stored chain only after auditing it and replaying it through DSM |
 | `ethical-agent` | No key and no charter. It is told how each candidate would move the bands, for display, and never passes a number to the model | Runs the model, sends its proposals, chooses among what it is told is eligible, and is told in words why anything was refused |
+| `ethical-console` | Public material only | A live view in your browser: the bands, every step and candidate, the world and the audit |
 | `ethical-audit` | Public material only | Checks a stored chain step by step, each from its parent alone, replays it through DSM, checks every act's receipt, and checks that the world holds exactly what committed acts wrote |
 
 Every candidate the model puts forward is committed with its outcome under one fork root, refused ones included. A fork the model replaces with another before choosing is signed and stored too, as a considered fork tied to its parent. A chain therefore records everything the AI put forward to the enforcer, not only what it did.
@@ -159,6 +160,23 @@ sandbox-exec -p "(version 1)(allow default)(deny network-outbound (remote ip))(d
 ## Continuous integration
 
 `.github/workflows/dsm-ethical-autonomy.yml` runs the Rust tests, formatting and Clippy, the CBFpy cross-check and the Lean proofs on every push and pull request.
+
+## Watching it
+
+`ethical-console` serves a live page on `127.0.0.1` only. It reads the store, the world, the charter and the public keys, holds no key and changes nothing, and works every verdict out again whenever the chain changes. Start it beside the enforcer:
+
+```bash
+./target/release/ethical-console --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub --device run/store/device.pub
+```
+
+Then open http://127.0.0.1:8770/. It shows:
+
+- **The bands:** each dimension with its center, its stop, restoring and hard limits as coupling sets them, the AI's position and its path. A slider moves through every step.
+- **The steps:** for each, every candidate the AI put forward, refused ones and replaced forks included, with the reason for each refusal, how each would have moved the bands, and what the chosen action wrote. Pointing at a candidate draws on the bands where it would have taken the AI.
+- **The world:** every file, and whether its receipt accounts for it.
+- **The audit:** each check, green or red.
+
+In separate-user mode the store and the world are readable only by the enforcer's user, so run the console as that user.
 
 ## Stops, failures and a second enforcer
 

@@ -87,7 +87,7 @@ pub fn guide(r: &Rejection, policy: &Policy) -> String {
     }
 }
 
-fn movements(e: &Evaluation, policy: &Policy) -> Vec<Movement> {
+pub fn movements(e: &Evaluation, policy: &Policy) -> Vec<Movement> {
     policy
         .bands
         .iter()

@@ -49,6 +49,19 @@ impl ChainStore {
         })
     }
 
+    /// Open an existing store to read, changing nothing, not even its directory's mode.
+    pub fn open_read_only(dir: &Path) -> Result<Self, AdapterError> {
+        if !dir.is_dir() {
+            return Err(AdapterError::BadStore(format!(
+                "{} is not a store",
+                dir.display()
+            )));
+        }
+        Ok(ChainStore {
+            dir: dir.to_path_buf(),
+        })
+    }
+
     /// Hold the store for this process alone. A second enforcer on the same store would commit
     /// beside the first, so it is refused. The lock lasts as long as the returned file.
     pub fn lock(&self) -> Result<File, AdapterError> {

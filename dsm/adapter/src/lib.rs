@@ -14,6 +14,7 @@ pub mod act;
 mod charter;
 pub mod commit;
 mod config;
+pub mod console;
 mod enforcer;
 pub mod fork;
 pub mod hexser;

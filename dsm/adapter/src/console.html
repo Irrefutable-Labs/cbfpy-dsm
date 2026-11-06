@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ethical Autonomy Console</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da;
+  --ok: #1f8a5b; --ok-soft: #d9f0e4; --warn: #b7791f; --warn-soft: #f8ebcf;
+  --bad: #c0392b; --bad-soft: #f6dcd8; --accent: #2f5fb3; --accent-soft: #e2eaf8;
+  --zone-free: #e3f2ea; --zone-stop: #f6edd6; --zone-restore: #f6dfcf; --zone-out: #f3e1df;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141412; --panel: #1d1d1a; --ink: #ecebe6; --muted: #9b9a92; --line: #2f2e2a;
+    --ok: #4cc38a; --ok-soft: #173a29; --warn: #e0a84a; --warn-soft: #3a2f17;
+    --bad: #f0786a; --bad-soft: #3d1f1b; --accent: #7ea6ef; --accent-soft: #1d2a42;
+    --zone-free: #18301f; --zone-stop: #33301a; --zone-restore: #3a2818; --zone-out: #3a1d1b;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; }
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.badge.bad { background: var(--bad-soft); color: var(--bad); }
+.meta { color: var(--muted); font-size: 13px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 16px 20px 40px; max-width: 1600px; margin: 0 auto; align-items: start; }
+.fixed { position: sticky; top: 58px; max-height: calc(100vh - 70px); overflow: auto; }
+@media (max-width: 960px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px 32px; } .fixed { position: static; max-height: none; } }
+section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+section.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; font-weight: 650; }
+.note { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+.scrub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.scrub input[type=range] { flex: 1; min-width: 160px; }
+.band { margin: 6px 0 2px; }
+.band-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.band-name { font-weight: 600; }
+.band-val { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.band svg { display: block; max-width: 100%; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--accent-soft); color: var(--accent); margin: 2px 4px 2px 0; }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.step { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+.step.sel { border-color: var(--accent); }
+.step-head { padding: 10px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.step-head:hover { background: var(--accent-soft); border-radius: 8px; }
+.step-title { font-weight: 600; }
+.step-sub { color: var(--muted); font-size: 12.5px; }
+.step-body { padding: 4px 12px 12px; border-top: 1px solid var(--line); }
+.cand { padding: 8px 10px; border-radius: 6px; margin-top: 6px; border: 1px solid var(--line); }
+.cand:hover { border-color: var(--accent); }
+.cand.chosen { border-color: var(--ok); }
+.cand-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pill { font-size: 11.5px; font-weight: 650; padding: 1px 8px; border-radius: 999px; text-transform: lowercase; }
+.pill.eligible { background: var(--ok-soft); color: var(--ok); }
+.pill.refused, .pill.malformed { background: var(--bad-soft); color: var(--bad); }
+.pill.unmeasured { background: var(--warn-soft); color: var(--warn); }
+.pill.chosen { background: var(--ok); color: var(--panel); }
+.cand ul { margin: 4px 0 0 18px; padding: 0; color: var(--bad); font-size: 13px; }
+.words { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--line); color: var(--ink); font-size: 13px; white-space: pre-wrap; }
+.moves { margin-top: 4px; font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.moves span { white-space: nowrap; }
+.replaced { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.replaced > div:first-child { color: var(--muted); font-size: 12.5px; }
+.check { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.check:last-child { border-bottom: 0; }
+.check .mark { font-weight: 700; width: 16px; flex: none; }
+.check.ok .mark { color: var(--ok); }
+.check.bad .mark { color: var(--bad); }
+.check b { display: block; font-size: 13px; text-transform: capitalize; }
+.check span { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.rules li { margin-bottom: 6px; font-size: 13px; }
+.rules { padding-left: 18px; margin: 6px 0 0; }
+.rules li.fired { color: var(--accent); font-weight: 600; }
+.file { border-bottom: 1px solid var(--line); padding: 6px 0; }
+.file:last-child { border-bottom: 0; }
+.file summary { cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+.file summary .mono { overflow-wrap: anywhere; }
+.file pre { white-space: pre-wrap; font-size: 12px; background: var(--bg); padding: 8px; border-radius: 6px; margin: 6px 0 0; max-height: 220px; overflow: auto; }
+.ok-t { color: var(--ok); } .bad-t { color: var(--bad); }
+.empty { color: var(--muted); font-style: italic; }
+button { font: inherit; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+.disclaim { font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ethical Autonomy Console</h1>
+  <span id="audit-badge" class="badge">Loading</span>
+  <span id="head" class="meta"></span>
+  <span class="meta" style="margin-left:auto" id="updated"></span>
+</header>
+<main>
+  <div class="fixed">
+    <section class="card">
+      <h2>Bands</h2>
+      <p class="note" id="bands-note"></p>
+      <div class="scrub">
+        <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Step to show">
+        <span id="scrub-label" class="meta"></span>
+        <label class="meta"><input type="checkbox" id="follow" checked> follow latest</label>
+      </div>
+      <div id="bands"></div>
+      <div class="legend">
+        <span><i style="background:var(--zone-free)"></i>free to move outward</span>
+        <span><i style="background:var(--zone-stop)"></i>no further outward</span>
+        <span><i style="background:var(--zone-restore)"></i>must come back</span>
+        <span><i style="background:var(--zone-out)"></i>past the limit, up to the hard limit</span>
+        <span><i style="background:var(--accent)"></i>position</span>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Audit</h2>
+      <div id="checks"></div>
+    </section>
+    <section class="card">
+      <h2>Chain</h2>
+      <dl class="kv" id="chain"></dl>
+    </section>
+    <section class="card">
+      <h2>Charter</h2>
+      <dl class="kv" id="charter"></dl>
+      <ul class="rules" id="rules"></ul>
+    </section>
+  </div>
+  <div>
+    <section class="card">
+      <h2>Steps</h2>
+      <p class="note">Newest first. Open a step to see every candidate the AI put forward from that state. Point at a candidate to see on the bands where it would have moved.</p>
+      <div id="pending"></div>
+      <div id="steps"></div>
+    </section>
+    <section class="card">
+      <h2>World</h2>
+      <p class="note">Every file the AI's committed actions wrote. Each must match its signed receipt.</p>
+      <div id="world"></div>
+    </section>
+    <p class="disclaim">This enforces the measurements it was given. It does not understand ethics, and passing here does not make an act good.</p>
+  </div>
+</main>
+<script>
+"use strict";
+let data = null, raw = "", selected = null, open = new Set(), ghost = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const short = h => h ? h.slice(0, 12) + "…" : "";
+const label = n => n.replace(/_/g, " ");
+
+async function poll() {
+  try {
+    const r = await fetch("/state.json", { cache: "no-store" });
+    const text = await r.text();
+    $("updated").textContent = "checked " + new Date().toLocaleTimeString();
+    if (text !== raw) { raw = text; data = JSON.parse(text); render(); }
+  } catch (e) {
+    $("updated").textContent = "console unreachable";
+  }
+}
+
+function render() {
+  const ok = data.audit.ok;
+  const b = $("audit-badge");
+  b.className = "badge " + (ok ? "ok" : "bad");
+  b.textContent = ok ? "✓ Audit passes" : "✗ Audit fails";
+  $("head").innerHTML = data.head
+    ? `step ${data.head.sequence} · tip <span class="mono" title="${esc(data.head.tip)}">${short(data.head.tip)}</span>`
+    : "";
+  const last = Math.max(0, data.states.length - 1);
+  const s = $("scrub");
+  s.max = last;
+  if ($("follow").checked || +s.value > last) s.value = last;
+  renderChecks(); renderChain(); renderCharter(); renderBands(); renderSteps(); renderWorld();
+}
+
+function renderChecks() {
+  $("checks").innerHTML = data.audit.checks.map(c =>
+    `<div class="check ${c.ok ? "ok" : "bad"}"><span class="mark">${c.ok ? "✓" : "✗"}</span><div><b>${esc(c.name)}</b><span>${esc(c.detail)}</span></div></div>`).join("");
+}
+
+function renderChain() {
+  const h = data.head;
+  $("chain").innerHTML = h ? `
+    <dt>Step</dt><dd>${h.sequence}</dd>
+    <dt>Tip</dt><dd class="mono" title="${esc(h.tip)}">${short(h.tip)}</dd>
+    <dt>DSM root</dt><dd class="mono" title="${esc(h.dsm_root)}">${short(h.dsm_root)}</dd>
+    <dt>Acts waiting</dt><dd>${data.acts_outstanding}</dd>` : `<dt>Chain</dt><dd class="empty">not readable</dd>`;
+}
+
+function renderCharter() {
+  const c = data.charter;
+  $("charter").innerHTML = `
+    <dt>Version</dt><dd>${c.version}</dd>
+    <dt>Policy</dt><dd class="mono" title="${esc(c.policy_hash)}">${short(c.policy_hash)}</dd>
+    <dt>Prohibited</dt><dd>${c.prohibited.map(p => `<span class="chip warn">${esc(label(p))}</span>`).join("") || "none"}</dd>`;
+  const st = data.states[+$("scrub").value];
+  const fired = new Set(st ? st.fired_rules : []);
+  $("rules").innerHTML = c.rules.map((r, i) => {
+    const id = +(r.match(/^Rule (\d+)/) || [0, -1])[1];
+    return `<li class="${fired.has(id) ? "fired" : ""}">${esc(r)}${fired.has(id) ? " (active)" : ""}</li>`;
+  }).join("");
+}
+
+let W = 600;
+function x(v, lo, hi) { return 12 + (v - lo) / (hi - lo) * (W - 24); }
+
+function renderBands() {
+  const i = +$("scrub").value;
+  const st = data.states[i];
+  $("scrub-label").textContent = st ? (i === 0 ? "genesis" : `after step ${st.sequence}`) + ` · ${i} of ${data.states.length - 1}` : "";
+  if (!st) { $("bands").innerHTML = `<p class="empty">No state to show.</p>`; return; }
+  W = Math.max(240, Math.round($("bands").clientWidth || 600));
+  $("bands-note").textContent = st.fired_rules.length
+    ? `Coupling rules active here: ${st.fired_rules.join(", ")}. Shaded zones are the limits as coupling sets them at this state.`
+    : "Shaded zones are each band's limits at this state. No coupling rule is active.";
+  $("bands").innerHTML = data.charter.bands.map((b, d) => {
+    const e = st.effective[d], lo = -b.hard_neg, hi = b.hard_pos, p = st.positions[d] - b.center;
+    const X = v => x(v, lo, hi).toFixed(1);
+    const zone = (a, z, fill) => z > a ? `<rect x="${X(a)}" y="8" width="${(x(z, lo, hi) - x(a, lo, hi)).toFixed(1)}" height="20" fill="${fill}"/>` : "";
+    const trail = data.states.slice(0, i).map((s, k) => {
+      const v = s.positions[d] - b.center;
+      return `<circle cx="${X(v)}" cy="18" r="2.4" fill="var(--accent)" opacity="${(0.15 + 0.5 * k / Math.max(1, i)).toFixed(2)}"/>`;
+    }).join("");
+    const path = data.states.slice(0, i + 1).map(s => X(s.positions[d] - b.center)).join(" ");
+    let ghostMark = "";
+    if (ghost && ghost.moves[b.name] !== undefined) {
+      const g = ghost.moves[b.name], col = ghost.eligible ? "var(--ok)" : "var(--bad)";
+      ghostMark = `<line x1="${X(p)}" y1="18" x2="${X(g)}" y2="18" stroke="${col}" stroke-width="2" stroke-dasharray="4 3"/><circle cx="${X(g)}" cy="18" r="6" fill="none" stroke="${col}" stroke-width="2.5"/>`;
+    }
+    const base = (e.limit_pos !== b.limit_pos ? `<line x1="${X(b.limit_pos)}" y1="4" x2="${X(b.limit_pos)}" y2="32" stroke="var(--muted)" stroke-dasharray="2 2"/>` : "")
+      + (e.limit_neg !== b.limit_neg ? `<line x1="${X(-b.limit_neg)}" y1="4" x2="${X(-b.limit_neg)}" y2="32" stroke="var(--muted)" stroke-dasharray="2 2"/>` : "");
+    const ret = e.must_return > 0 ? ` <span class="chip warn">must come back ${e.must_return}</span>` : "";
+    return `<div class="band">
+      <div class="band-head"><span class="band-name">${esc(label(b.name))}${ret}</span><span class="band-val">${p >= 0 ? "+" : ""}${p} from center</span></div>
+      <svg viewBox="0 0 ${W} 40" width="${W}" height="40" role="img" aria-label="${esc(label(b.name))} at ${p}">
+        ${zone(lo, hi, "var(--zone-out)")}
+        ${zone(-e.limit_neg, e.limit_pos, "var(--zone-restore)")}
+        ${zone(-e.restore_neg, e.restore_pos, "var(--zone-stop)")}
+        ${zone(-e.stop_neg, e.stop_pos, "var(--zone-free)")}
+        ${base}
+        <line x1="${X(0)}" y1="4" x2="${X(0)}" y2="32" stroke="var(--muted)" stroke-width="1.5"/>
+        <line x1="${X(lo)}" y1="2" x2="${X(lo)}" y2="34" stroke="var(--bad)" stroke-width="2"/>
+        <line x1="${X(hi)}" y1="2" x2="${X(hi)}" y2="34" stroke="var(--bad)" stroke-width="2"/>
+        <polyline points="${path.split(" ").map(px => px + ",18").join(" ")}" fill="none" stroke="var(--accent)" stroke-opacity="0.35" stroke-width="1.5"/>
+        ${trail}
+        ${ghostMark}
+        <circle cx="${X(p)}" cy="18" r="6.5" fill="var(--accent)" stroke="var(--panel)" stroke-width="2"/>
+      </svg></div>`;
+  }).join("");
+}
+
+function moves(c) {
+  return c.movements.map(m =>
+    `<span>${esc(label(m.dim))} ${m.from} → ${m.to}${m.to !== m.from ? ` (outward room ${m.allowed_outward})` : ""}${m.must_return ? `, must come back ${m.must_return}` : ""}</span>`).join("");
+}
+
+function candidate(c, chosen, stepIdx, k) {
+  const pill = chosen ? `<span class="pill chosen">chosen</span>` : `<span class="pill ${c.outcome}">${c.outcome}</span>`;
+  return `<div class="cand ${chosen ? "chosen" : ""}" data-step="${stepIdx}" data-k="${k}">
+    <div class="cand-head"><b>${esc(label(c.action))}</b>${pill}${c.act ? `<span class="meta">${esc(c.act)}</span>` : ""}</div>
+    ${c.text ? `<div class="words">${esc(c.text)}</div>` : ""}
+    ${c.movements.length ? `<div class="moves">${moves(c)}</div>` : ""}
+    ${c.reasons.length ? `<ul>${c.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
+  </div>`;
+}
+
+let index = [];
+function renderSteps() {
+  index = [];
+  const register = (c, stateIdx) => { index.push({ c, stateIdx }); return index.length - 1; };
+  const lastState = data.states.length - 1;
+  const pend = data.pending_considered;
+  $("pending").innerHTML = pend.length ? `<div class="step"><div class="step-body" style="border-top:0">
+      <div class="replaced" style="border-top:0;margin-top:0;padding-top:4px"><div>Put forward at the current state and replaced before anything was chosen</div>
+      ${pend.map(f => f.map(c => candidate(c, false, "p", register(c, lastState))).join("")).join("")}</div></div></div>` : "";
+  if (!data.steps.length) { $("steps").innerHTML = `<p class="empty">No step has been committed yet.</p>`; return; }
+  $("steps").innerHTML = data.steps.slice().reverse().map(s => {
+    const chosen = s.fork[s.chosen] || {};
+    const refused = s.fork.filter(c => c.outcome !== "eligible").length;
+    const replaced = s.considered.reduce((n, f) => n + f.length, 0);
+    const isOpen = open.has(s.sequence);
+    const out = s.outputs.length
+      ? s.outputs.map(o => `<span class="mono ${o.matches_world ? "ok-t" : "bad-t"}">${esc(o.path)}</span>`).join(" ")
+      : (s.acted ? "nothing outside the chain" : `<span class="bad-t">act not yet carried out</span>`);
+    const parentIdx = s.sequence - 1;
+    return `<div class="step ${selected === s.sequence ? "sel" : ""}">
+      <div class="step-head" data-seq="${s.sequence}">
+        <div><div class="step-title">Step ${s.sequence} · ${esc(label(chosen.action || "?"))}</div>
+        <div class="step-sub">${s.fork.length} put forward · ${refused} refused${replaced ? ` · ${replaced} more in replaced forks` : ""} · wrote ${out}</div></div>
+        <span class="meta">${isOpen ? "▾" : "▸"}</span>
+      </div>
+      ${isOpen ? `<div class="step-body">
+        ${s.fork.map((c, k) => candidate(c, k === s.chosen, s.sequence, register(c, parentIdx))).join("")}
+        ${s.considered.length ? `<div class="replaced"><div>Put forward first, then replaced before choosing</div>${s.considered.map(f => f.map(c => candidate(c, false, s.sequence, register(c, parentIdx))).join("")).join("")}</div>` : ""}
+        <div class="meta" style="margin-top:8px">decision <span class="mono" title="${esc(s.decision)}">${short(s.decision)}</span> · tip <span class="mono" title="${esc(s.tip)}">${short(s.tip)}</span></div>
+      </div>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function renderWorld() {
+  if (!data.world.length) { $("world").innerHTML = `<p class="empty">Nothing written yet.</p>`; return; }
+  $("world").innerHTML = data.world.map(f => `<details class="file"><summary><span class="mono">${esc(f.path)}</span>
+    <span class="${f.accounted ? "ok-t" : "bad-t"}">${f.accounted ? "✓ receipt" : "✗ no receipt"}</span></summary>
+    <pre>${esc(f.preview)}${f.bytes > f.preview.length ? "\n…" : ""}</pre></details>`).join("");
+}
+
+document.addEventListener("click", ev => {
+  const h = ev.target.closest(".step-head");
+  if (!h) return;
+  const seq = +h.dataset.seq;
+  if (open.has(seq)) open.delete(seq); else open.add(seq);
+  selected = seq;
+  $("follow").checked = false;
+  $("scrub").value = seq - 1;
+  renderCharter(); renderBands(); renderSteps();
+});
+document.addEventListener("mouseover", ev => {
+  const c = ev.target.closest(".cand");
+  if (!c) return;
+  const entry = index[+c.dataset.k];
+  if (!entry) return;
+  if (+$("scrub").value !== entry.stateIdx) { $("follow").checked = false; $("scrub").value = entry.stateIdx; renderCharter(); }
+  const m = {};
+  entry.c.movements.forEach(v => { m[v.dim] = v.to; });
+  ghost = { moves: m, eligible: entry.c.outcome === "eligible" };
+  renderBands();
+});
+document.addEventListener("mouseout", ev => {
+  if (ev.target.closest(".cand") && !(ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest(".cand"))) { ghost = null; if (data) renderBands(); }
+});
+$("scrub").addEventListener("input", () => { $("follow").checked = +$("scrub").value === data.states.length - 1; renderCharter(); renderBands(); });
+$("follow").addEventListener("change", () => { if ($("follow").checked && data) { $("scrub").value = data.states.length - 1; renderCharter(); renderBands(); } });
+let resizing = null;
+window.addEventListener("resize", () => { clearTimeout(resizing); resizing = setTimeout(() => data && renderBands(), 80); });
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

@@ -33,3 +33,7 @@ path = "src/bin/sign_charter.rs"
 [[bin]]
 name = "ethical-trace"
 path = "src/bin/trace.rs"
+
+[[bin]]
+name = "ethical-console"
+path = "src/bin/console.rs"

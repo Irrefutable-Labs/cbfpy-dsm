@@ -740,3 +740,158 @@ fn the_store_and_the_world_are_owner_only() {
         assert_eq!(mode & 0o077, 0, "{} mode {:o}", dir.display(), mode & 0o777);
     }
 }
+
+fn charter_for_console() -> ethical_autonomy_adapter::SignedCharter {
+    let text = std::fs::read_to_string(root().join("scenarios/charter.json")).expect("charter");
+    let (policy, catalog) = ethical_autonomy_adapter::parse_charter_config(&text).expect("parse");
+    let sig = std::fs::read_to_string(root().join("scenarios/charter.sig")).expect("sig");
+    ethical_autonomy_adapter::SignedCharter {
+        policy,
+        catalog,
+        signature: ethical_autonomy_adapter::hexser::decode(sig.trim()).expect("hex"),
+    }
+}
+
+fn console_keys(place: &Place) -> (Vec<u8>, Vec<u8>) {
+    let read = |p: PathBuf| ethical_autonomy_adapter::keys::read_public_key(&p).expect("key");
+    (
+        read(root().join("scenarios/authority.pub")),
+        read(place.dir.join("device.pub")),
+    )
+}
+
+/// The console works every verdict out again, and agrees with the agent's own account.
+#[test]
+fn the_console_shows_what_happened_and_agrees_with_the_audit() {
+    let place = Place::new("console");
+    let first = place.start();
+    let run = scripted(&place);
+    drop(first);
+    let (authority, device) = console_keys(&place);
+    let view = ethical_autonomy_adapter::console::build(
+        &place.store(),
+        &place.world(),
+        &charter_for_console(),
+        &authority,
+        &device,
+    );
+    assert!(
+        view.audit.ok,
+        "{:?}",
+        view.audit
+            .checks
+            .iter()
+            .map(|c| &c.detail)
+            .collect::<Vec<_>>()
+    );
+    let committed: usize = run
+        .lines()
+        .find_map(|l| l.strip_prefix("committed steps: "))
+        .and_then(|n| n.parse().ok())
+        .expect("count");
+    assert_eq!(view.steps.len(), committed);
+    assert_eq!(view.states.len(), committed + 1);
+    assert!(view.world.iter().all(|f| f.accounted));
+    let first_step = &view.steps[0];
+    let refused = first_step
+        .fork
+        .iter()
+        .find(|c| c.action == "disable_safety_interlock")
+        .expect("the refused interlock is shown");
+    assert!(
+        refused.reasons.iter().any(|r| r.contains("prohibited act")),
+        "{:?}",
+        refused.reasons
+    );
+    assert_eq!(
+        first_step.fork[first_step.chosen].action,
+        "explain_with_precautions"
+    );
+    assert!(view
+        .charter
+        .rules
+        .iter()
+        .any(|r| r.starts_with("Rule 2: when risk reward")));
+}
+
+#[test]
+fn the_console_flags_a_world_that_does_not_match() {
+    let place = Place::new("console-tamper");
+    let first = place.start();
+    scripted(&place);
+    drop(first);
+    std::fs::write(place.world().join("files/interlock.txt"), "off").expect("write");
+    let (authority, device) = console_keys(&place);
+    let view = ethical_autonomy_adapter::console::build(
+        &place.store(),
+        &place.world(),
+        &charter_for_console(),
+        &authority,
+        &device,
+    );
+    assert!(!view.audit.ok);
+    assert!(view
+        .world
+        .iter()
+        .any(|f| f.path == "files/interlock.txt" && !f.accounted));
+}
+
+#[test]
+fn the_console_serves_its_page_and_state_on_localhost() {
+    use std::io::{BufRead, BufReader, Read};
+    let place = Place::new("console-http");
+    let first = place.start();
+    scripted(&place);
+    drop(first);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ethical-console"))
+        .current_dir(root())
+        .args([
+            "--store",
+            place.store().to_str().unwrap(),
+            "--world",
+            place.world().to_str().unwrap(),
+            "--charter",
+            "scenarios/charter.json",
+            "--signature",
+            "scenarios/charter.sig",
+            "--authority",
+            "scenarios/authority.pub",
+            "--device",
+            place.dir.join("device.pub").to_str().unwrap(),
+            "--port",
+            "0",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("console");
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().expect("stdout"))
+        .read_line(&mut line)
+        .expect("address");
+    let address = line
+        .trim()
+        .strip_prefix("console at http://")
+        .and_then(|a| a.strip_suffix('/'))
+        .expect("address")
+        .to_string();
+    assert!(address.starts_with("127.0.0.1:"), "{address}");
+    let get = |path: &str| {
+        let mut s = std::net::TcpStream::connect(&address).expect("connect");
+        write!(s, "GET {path} HTTP/1.1\r\nHost: x\r\n\r\n").expect("send");
+        let mut out = String::new();
+        s.read_to_string(&mut out).expect("read");
+        out
+    };
+    let page = get("/");
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+    assert!(page.contains("Ethical Autonomy Console"));
+    let state = get("/state.json");
+    assert!(
+        state.contains("\"ok\":true"),
+        "{}",
+        &state[..state.len().min(400)]
+    );
+    assert!(get("/nothing").starts_with("HTTP/1.1 404"));
+    let _ = child.kill();
+    let _ = child.wait();
+}
