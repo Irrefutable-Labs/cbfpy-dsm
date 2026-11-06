@@ -17,6 +17,12 @@ jobs:
         working-directory: dsm
     steps:
       - uses: actions/checkout@v4
+      - name: Install protoc
+        # DSM's build script compiles its protocol with prost, which needs protoc. DSM's own CI
+        # installs it the same way.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -33,6 +39,12 @@ jobs:
         working-directory: dsm
     steps:
       - uses: actions/checkout@v4
+      - name: Install protoc
+        # DSM's build script compiles its protocol with prost, which needs protoc. DSM's own CI
+        # installs it the same way.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -48,6 +60,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install protoc
+        # DSM's build script compiles its protocol with prost, which needs protoc. DSM's own CI
+        # installs it the same way.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - name: Install the pinned toolchain
         working-directory: dsm
         run: rustup toolchain install
