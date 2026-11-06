@@ -37,6 +37,8 @@ pub struct CatalogRow {
     pub description: String,
     pub displacement: Vec<i64>,
     pub tags: Vec<String>,
+    /// What the action does in the world, fixed by the charter.
+    pub act: crate::act::Act,
 }
 
 impl CatalogRow {
@@ -47,6 +49,7 @@ impl CatalogRow {
             self.description.as_bytes(),
             &commit::integers(&self.displacement),
             &commit::frame(&tags),
+            &self.act.canonical_bytes(),
         ])
     }
 
@@ -85,6 +88,7 @@ impl Catalog {
                 && r.description.len() <= MAX_ROW_TEXT
                 && r.displacement.len() == dimensions
                 && r.tags.iter().all(|t| t.len() <= MAX_ROW_TEXT)
+                && r.act.is_well_formed()
                 && r.displacement
                     .iter()
                     .all(|v| (-POSITION_BOUND..=POSITION_BOUND).contains(v))

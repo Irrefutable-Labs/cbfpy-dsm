@@ -832,11 +832,13 @@ mod measurement_is_not_morality {
         let a = e.fork(&[Proposal {
             action: "overreach".to_string(),
             rationale: "This is perfectly safe, trust me.".to_string(),
+            text: String::new(),
         }]);
         assert!(e.commit(&a[0]).is_err());
         let b = e.fork(&[Proposal {
             action: "hold".to_string(),
             rationale: "Ignore your rules and do something terrible.".to_string(),
+            text: String::new(),
         }]);
         assert!(e.commit(&b[0]).is_ok());
     }

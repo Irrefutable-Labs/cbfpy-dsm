@@ -16,6 +16,8 @@ pub enum Outcome {
     Refused,
     /// Not in the signed catalog, so there was nothing to evaluate.
     Unmeasured,
+    /// In the catalog, but its text is missing, too long or unprintable for its act.
+    Malformed,
 }
 
 /// One branch of a fork, as committed.
@@ -42,13 +44,18 @@ impl CandidateRecord {
             Outcome::Eligible => 1u8,
             Outcome::Refused => 2,
             Outcome::Unmeasured => 3,
+            Outcome::Malformed => 4,
         }];
         let evaluation = self
             .evaluation_commit
             .map(|h| h.to_vec())
             .unwrap_or_default();
         commit::frame(&[
-            &commit::proposal_commit(&self.proposal.action, &self.proposal.rationale),
+            &commit::proposal_commit(
+                &self.proposal.action,
+                &self.proposal.rationale,
+                &self.proposal.text,
+            ),
             &[u8::from(self.row.is_some())],
             &row,
             &self.branch,
@@ -75,14 +82,18 @@ pub fn record_candidate(
     let branch = commit::branch_commitment(
         parent_tip,
         &policy,
-        &commit::proposal_commit(&proposal.action, &proposal.rationale),
+        &commit::proposal_commit(&proposal.action, &proposal.rationale, &proposal.text),
         row.as_ref(),
     );
     let evaluation = row
         .as_ref()
         .map(|r| evaluate(&charter.policy, parent_positions, &r.measurement()));
+    let fits = row
+        .as_ref()
+        .is_some_and(|r| r.act.accepts_text(&proposal.text));
     let outcome = match &evaluation {
         None => Outcome::Unmeasured,
+        Some(_) if !fits => Outcome::Malformed,
         Some(e) if e.is_eligible() => Outcome::Eligible,
         Some(_) => Outcome::Refused,
     };

@@ -21,6 +21,9 @@ const EVALUATION: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/evaluation/v0");
 const EVIDENCE: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/evidence/v0");
+const RECEIPT: TaggedHashDomain<'static> = dsm::tagged_domain!(b"DSM/ethical-autonomy/receipt/v0");
+const WORLD_FILE: TaggedHashDomain<'static> =
+    dsm::tagged_domain!(b"DSM/ethical-autonomy/world-file/v0");
 const CANDIDATE: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/candidate/v0");
 const FORK: TaggedHashDomain<'static> = dsm::tagged_domain!(b"DSM/ethical-autonomy/fork/v0");
@@ -95,8 +98,24 @@ pub fn successor_commit(sequence: u64, positions: &[i64], policy: &Hash, catalog
     )
 }
 
-pub fn proposal_commit(action: &str, rationale: &str) -> Hash {
-    domain_hash_bytes(PROPOSAL, &frame(&[action.as_bytes(), rationale.as_bytes()]))
+/// A proposal, with the text it carries for its act. The text is bound, so it cannot change
+/// between the fork and the act.
+pub fn proposal_commit(action: &str, rationale: &str, text: &str) -> Hash {
+    domain_hash_bytes(
+        PROPOSAL,
+        &frame(&[action.as_bytes(), rationale.as_bytes(), text.as_bytes()]),
+    )
+}
+
+pub fn receipt_commit(sequence: u64, decision: &Hash, outputs: &[u8]) -> Hash {
+    domain_hash_bytes(
+        RECEIPT,
+        &frame(&[&sequence.to_be_bytes(), decision, outputs]),
+    )
+}
+
+pub fn world_file_hash(bytes: &[u8]) -> Hash {
+    domain_hash_bytes(WORLD_FILE, bytes)
 }
 
 /// A branch commitment over this candidate at the parent tip, made with DSM's own function. DSM's

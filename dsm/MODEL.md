@@ -111,3 +111,11 @@ Tripwire's rule that only one branch of a parent can be realized is relied on on
 The enforcer is its own process. It holds the device key and the chain, and serves a Unix socket that only its owner can open. The AI's side, `ethical-agent`, holds no key, charter or number. It can ask for the menu of action names and descriptions, the current state, and to propose and choose. When a fork has nothing eligible, the enforcer returns each refusal in words, such as that a band must come back toward its center. The agent asks the model again with that guidance, up to twice, which is how the bands pull the AI back.
 
 Each step is checked by the enforcer from its parent and written to disk before it is installed. A stored chain is never trusted on restart. Its genesis must be the one the key and charter produce, each step must verify from its parent, and each step is replayed through DSM's `prepare_advance_relationship` and `commit_advance`, so the DSM head is rebuilt and not read back. `ethical-audit` does the same with public material only.
+
+## Acts
+
+A catalog row's act is part of its canonical bytes, so the authority's signature covers what each action does. The model's text is part of the proposal commitment, and so of the branch commitment and the fork root. A candidate whose act needs text and has none, or has text too long or unprintable for it, is recorded as malformed and cannot be committed.
+
+The enforcer carries out an act only after `commit_with` has verified, stored and installed its step. The act writes through a temporary file and a rename, at a path fixed by the charter or keyed by the step's sequence, so a crash leaves old bytes or new ones, and running it again writes the same bytes. Its receipt, `H(sequence, decision, outputs)` under the device key, is stored after the step. On restart, steps after the last receipt have their acts carried out before anything is served.
+
+The audit holds each receipt to its step's sequence and decision commitment, and requires every file in the world to hash to what the latest receipt touching its path says, with nothing left over. **What the text says is not measured.** The engine weighs the action, not its words, so a reply's content is the model's own. Measuring it is part of the open measurement question.

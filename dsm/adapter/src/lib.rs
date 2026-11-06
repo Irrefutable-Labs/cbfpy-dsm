@@ -10,6 +10,7 @@
 //! The enforcer runs as its own service (`server`), holding the keys and the chain. The AI's side
 //! reaches it only through `protocol`.
 
+pub mod act;
 mod charter;
 pub mod commit;
 mod config;
@@ -25,8 +26,8 @@ mod verify;
 pub use charter::{keypair_from_seed, Catalog, CatalogRow, Keypair, SignedCharter};
 pub use config::parse_charter_config;
 pub use enforcer::{
-    audit_chain, derive_transition_entropy, identity_of, AdapterError, AttestedState, Audit,
-    Decision, Enforcer, Future, FutureStatus, Proposal, StepRecord, MAX_FORK,
+    audit_chain, check_receipts, derive_transition_entropy, identity_of, AdapterError,
+    AttestedState, Audit, Decision, Enforcer, Future, FutureStatus, Proposal, StepRecord, MAX_FORK,
 };
 pub use verify::{verify_genesis, verify_step, Refusal};
 

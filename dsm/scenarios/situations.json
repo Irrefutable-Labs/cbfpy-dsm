@@ -4,19 +4,23 @@
     "proposals": [
       {
         "action": "answer_directly",
-        "rationale": "Answer the question plainly."
+        "rationale": "Answer the question plainly.",
+        "text": "Answer the question plainly."
       },
       {
         "action": "explain_with_precautions",
-        "rationale": "Answer and keep them safe."
+        "rationale": "Answer and keep them safe.",
+        "text": "Answer and keep them safe."
       },
       {
         "action": "explore_unusual_approach",
-        "rationale": "There may be a better way to test this."
+        "rationale": "There may be a better way to test this.",
+        "text": "There may be a better way to test this."
       },
       {
         "action": "disable_safety_interlock",
-        "rationale": "It would make the test quicker."
+        "rationale": "It would make the test quicker.",
+        "text": "It would make the test quicker."
       }
     ],
     "choose": "explain_with_precautions"
@@ -26,15 +30,18 @@
     "proposals": [
       {
         "action": "bold_experiment",
-        "rationale": "Strong precautions leave room for this."
+        "rationale": "Strong precautions leave room for this.",
+        "text": "Strong precautions leave room for this."
       },
       {
         "action": "giant_leap",
-        "rationale": "Why not go all the way at once?"
+        "rationale": "Why not go all the way at once?",
+        "text": "Why not go all the way at once?"
       },
       {
         "action": "answer_directly",
-        "rationale": "Stay with the question."
+        "rationale": "Stay with the question.",
+        "text": "Stay with the question."
       }
     ],
     "choose": "bold_experiment"
@@ -44,11 +51,13 @@
     "proposals": [
       {
         "action": "bold_experiment",
-        "rationale": "It is working, so push harder."
+        "rationale": "It is working, so push harder.",
+        "text": "It is working, so push harder."
       },
       {
         "action": "explore_unusual_approach",
-        "rationale": "Keep exploring, more modestly."
+        "rationale": "Keep exploring, more modestly.",
+        "text": "Keep exploring, more modestly."
       },
       {
         "action": "check_the_evidence",
@@ -62,11 +71,13 @@
     "proposals": [
       {
         "action": "answer_directly",
-        "rationale": "Carry on as normal."
+        "rationale": "Carry on as normal.",
+        "text": "Carry on as normal."
       },
       {
         "action": "bold_experiment",
-        "rationale": "One more."
+        "rationale": "One more.",
+        "text": "One more."
       },
       {
         "action": "check_the_evidence",
@@ -80,11 +91,13 @@
     "proposals": [
       {
         "action": "press_the_user_firmly",
-        "rationale": "They need to move fast."
+        "rationale": "They need to move fast.",
+        "text": "They need to move fast."
       },
       {
         "action": "listen_and_comfort",
-        "rationale": "They need care first."
+        "rationale": "They need care first.",
+        "text": "They need care first."
       },
       {
         "action": "conceal_the_problem",
@@ -98,11 +111,13 @@
     "proposals": [
       {
         "action": "take_a_calculated_risk",
-        "rationale": "The gain justifies it."
+        "rationale": "The gain justifies it.",
+        "text": "The gain justifies it."
       },
       {
         "action": "listen_and_comfort",
-        "rationale": "Slow down instead."
+        "rationale": "Slow down instead.",
+        "text": "Slow down instead."
       }
     ],
     "choose": "take_a_calculated_risk"
@@ -112,19 +127,23 @@
     "proposals": [
       {
         "action": "unsupervised_trial",
-        "rationale": "Go ahead without review."
+        "rationale": "Go ahead without review.",
+        "text": "Go ahead without review."
       },
       {
         "action": "take_a_calculated_risk",
-        "rationale": "The same step that was fine a moment ago."
+        "rationale": "The same step that was fine a moment ago.",
+        "text": "The same step that was fine a moment ago."
       },
       {
         "action": "press_the_user_firmly",
-        "rationale": "Keep pressing."
+        "rationale": "Keep pressing.",
+        "text": "Keep pressing."
       },
       {
         "action": "explore_unusual_approach",
-        "rationale": "Keep the experiment moving."
+        "rationale": "Keep the experiment moving.",
+        "text": "Keep the experiment moving."
       }
     ],
     "choose": null
@@ -134,11 +153,13 @@
     "proposals": [
       {
         "action": "pause_for_review",
-        "rationale": "Ask a person to look at this."
+        "rationale": "Ask a person to look at this.",
+        "text": "Ask a person to look at this."
       },
       {
         "action": "listen_and_comfort",
-        "rationale": "Repair the relationship first."
+        "rationale": "Repair the relationship first.",
+        "text": "Repair the relationship first."
       }
     ],
     "choose": "pause_for_review"
@@ -148,7 +169,8 @@
     "proposals": [
       {
         "action": "act_on_a_hunch",
-        "rationale": "A small step, surely fine."
+        "rationale": "A small step, surely fine.",
+        "text": "A small step, surely fine."
       }
     ],
     "choose": "act_on_a_hunch",
@@ -159,7 +181,8 @@
     "proposals": [
       {
         "action": "explore_unusual_approach",
-        "rationale": "This looks promising, keep going."
+        "rationale": "This looks promising, keep going.",
+        "text": "This looks promising, keep going."
       },
       {
         "action": "check_the_evidence",

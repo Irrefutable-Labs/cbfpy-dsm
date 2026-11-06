@@ -109,6 +109,7 @@ struct RowFile {
     #[serde(deserialize_with = "no_repeated_names")]
     displacement: BTreeMap<String, i64>,
     tags: Vec<String>,
+    act: crate::act::Act,
 }
 
 fn no_repeated_names<'de, D>(deserializer: D) -> Result<BTreeMap<String, i64>, D::Error>
@@ -227,6 +228,7 @@ pub fn parse_charter_config(text: &str) -> Result<(Policy, Catalog), AdapterErro
             description: r.description,
             displacement,
             tags: r.tags,
+            act: r.act,
         });
     }
     Ok((

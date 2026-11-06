@@ -131,6 +131,19 @@ pub fn report(futures: &[Future], policy: &Policy) -> Vec<FutureReport> {
                 guidance: e.rejections.iter().map(|r| guide(r, policy)).collect(),
                 movements: movements(e, policy),
             },
+            FutureStatus::Malformed => FutureReport {
+                index: f.index,
+                action: f.proposal.action.clone(),
+                outcome: Outcome::Malformed,
+                reasons: vec![
+                    "its text is missing, too long or unprintable for what it does".to_string(),
+                ],
+                guidance: vec![
+                    "That action needs a short, plain text saying what it will say or write."
+                        .to_string(),
+                ],
+                movements: vec![],
+            },
             FutureStatus::Unmeasured => FutureReport {
                 index: f.index,
                 action: f.proposal.action.clone(),

@@ -1,7 +1,9 @@
 //! The enforcer service. It holds the device key, the chain and the DSM head, and listens on a
 //! Unix socket that only its own user can open. A model never runs in this process.
 //!
-//! ethical-enforcer --store DIR --charter C --signature SIG --device-seed FILE --socket PATH
+//! ethical-enforcer --store DIR --world DIR --charter C --signature SIG --device-seed FILE --socket PATH
+//!
+//! The world directory is where committed actions take effect, and nowhere else.
 //!
 //! The device seed file must be readable by its owner alone. A store that exists is audited in
 //! full and replayed through core before anything is served. One that does not verify stops it.
@@ -10,7 +12,8 @@ use ethical_autonomy_adapter::hexser::{decode, to_hex};
 use ethical_autonomy_adapter::server::Service;
 use ethical_autonomy_adapter::store::ChainStore;
 use ethical_autonomy_adapter::{
-    keypair_from_seed, parse_charter_config, Enforcer, SignedCharter, TRUSTED_AUTHORITY_PUBLIC,
+    check_receipts, keypair_from_seed, parse_charter_config, Enforcer, SignedCharter,
+    TRUSTED_AUTHORITY_PUBLIC,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
@@ -19,6 +22,7 @@ use std::process::ExitCode;
 
 struct Args {
     store: PathBuf,
+    world: PathBuf,
     charter: PathBuf,
     signature: PathBuf,
     device_seed: PathBuf,
@@ -27,8 +31,8 @@ struct Args {
 
 fn args() -> Result<Args, String> {
     let mut a = std::env::args().skip(1);
-    let (mut store, mut charter, mut signature, mut seed, mut socket) =
-        (None, None, None, None, None);
+    let (mut store, mut world, mut charter, mut signature, mut seed, mut socket) =
+        (None, None, None, None, None, None);
     while let Some(flag) = a.next() {
         let value = a
             .next()
@@ -36,6 +40,7 @@ fn args() -> Result<Args, String> {
             .ok_or(format!("{flag} needs a value"))?;
         match flag.as_str() {
             "--store" => store = Some(value),
+            "--world" => world = Some(value),
             "--charter" => charter = Some(value),
             "--signature" => signature = Some(value),
             "--device-seed" => seed = Some(value),
@@ -45,6 +50,7 @@ fn args() -> Result<Args, String> {
     }
     Ok(Args {
         store: store.ok_or("--store is required")?,
+        world: world.ok_or("--world is required")?,
         charter: charter.ok_or("--charter is required")?,
         signature: signature.ok_or("--signature is required")?,
         device_seed: seed.ok_or("--device-seed is required")?,
@@ -89,23 +95,35 @@ fn run() -> Result<(), String> {
     let device = keypair_from_seed(&device_seed(&args.device_seed)?).map_err(|e| e.to_string())?;
 
     let store = ChainStore::open(&args.store).map_err(|e| e.to_string())?;
-    let enforcer = if store.exists() {
-        let (genesis, steps) = store.load().map_err(|e| e.to_string())?;
-        let e = Enforcer::resume(device, charter, &trusted, &genesis, &steps)
+    let (enforcer, steps, receipts) = if store.exists() {
+        let stored = store.load().map_err(|e| e.to_string())?;
+        let e = Enforcer::resume(device, charter, &trusted, &stored.genesis, &stored.steps)
+            .map_err(|e| format!("the stored chain was refused: {e}"))?;
+        check_receipts(e.device_public(), &stored.steps, &stored.receipts)
             .map_err(|e| format!("the stored chain was refused: {e}"))?;
         eprintln!(
             "resumed at step {} after auditing every step",
             e.state().sequence
         );
-        e
+        (e, stored.steps, stored.receipts.len())
     } else {
         let e = Enforcer::genesis(device, charter, &trusted).map_err(|e| e.to_string())?;
         store
             .begin(&e.state(), e.device_public())
             .map_err(|e| e.to_string())?;
         eprintln!("began a new chain");
-        e
+        (e, vec![], 0)
     };
+    let tip = enforcer.tip();
+    let service = Service::start(
+        enforcer,
+        store,
+        args.world.clone(),
+        trusted,
+        &steps,
+        receipts,
+    )
+    .map_err(|e| e.to_string())?;
 
     if args.socket.exists() {
         std::fs::remove_file(&args.socket).map_err(|e| e.to_string())?;
@@ -116,11 +134,9 @@ fn run() -> Result<(), String> {
     eprintln!(
         "listening on {} at tip {}",
         args.socket.display(),
-        to_hex(&enforcer.tip())
+        to_hex(&tip)
     );
-    Service::new(enforcer, store, trusted)
-        .serve(listener)
-        .map_err(|e| e.to_string())
+    service.serve(listener).map_err(|e| e.to_string())
 }
 
 fn main() -> ExitCode {

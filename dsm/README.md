@@ -10,11 +10,28 @@ Three programs, and the model never shares a process with the keys.
 
 | Program | Holds | Does |
 |---|---|---|
-| `ethical-enforcer` | The device key, the chain on disk, the real DSM head | Serves a Unix socket only its owner can open. Forks proposals, commits the chosen one, writes each step before installing it, and resumes a stored chain only after auditing it and replaying it through DSM |
+| `ethical-enforcer` | The device key, the chain on disk, the real DSM head, and the world directory | Serves a Unix socket only its owner can open. Forks proposals, commits the chosen one, writes each step before installing it, then carries out the step's act in the world and signs a receipt for it. Resumes a stored chain only after auditing it and replaying it through DSM |
 | `ethical-agent` | Nothing: no key, no charter, no number | Runs the model, sends its proposals, chooses among what it is told is eligible, and is told in words why anything was refused |
-| `ethical-audit` | Public material only | Checks a stored chain step by step, each from its parent alone, and replays it through DSM |
+| `ethical-audit` | Public material only | Checks a stored chain step by step, each from its parent alone, replays it through DSM, checks every act's receipt, and checks that the world holds exactly what committed acts wrote |
 
 Every candidate the model puts forward is committed with its outcome under one fork root, refused ones included. A chain therefore records everything the AI considered at each step, not only what it did.
+
+## Actions are real, and only the enforcer can take them
+
+Each action in the catalog names an **act**, fixed in the signed charter:
+
+| Act | Writes, inside the world directory |
+|---|---|
+| `reply` | `replies/<step>.txt` |
+| `journal` | `journal/<step>.md` |
+| `message` to a named recipient | `outbox/<recipient>/<step>.txt` |
+| `write_file` with a named file | `files/<name>` |
+| `run` a fixed command | `runs/<step>.out`, its output, from a command run in the world with an empty environment and a 10 second limit |
+| `none` | nothing |
+
+The model chooses the action and supplies at most a piece of text: what a reply, message or file will say. The text is bound into the fork commitment, so it cannot change between proposing and acting. Everything else, which file, which recipient, which command, is the charter's. An act runs only after its step is committed and stored, writes only in the world directory, and produces a receipt signed by the device with the hash of every byte it wrote. A stop between committing and acting is finished at the next start, and every act writes the same bytes if run twice.
+
+The agent cannot write the world at all: in the recorded run and in a test, the operating system denies it. The world changes only through the enforcer, and `ethical-audit --world` fails if it holds a file no committed act wrote.
 
 ## Layout
 
@@ -48,7 +65,7 @@ mkdir -p run && openssl rand -hex 32 > run/seed && chmod 600 run/seed
 Start the enforcer in one terminal:
 
 ```bash
-./target/release/ethical-enforcer --store run/store --charter scenarios/charter.json --signature scenarios/charter.sig --device-seed run/seed --socket run/s
+./target/release/ethical-enforcer --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --device-seed run/seed --socket run/s
 ```
 
 Run the scripted situations from another:
@@ -72,7 +89,7 @@ See where the chain stands:
 Audit the stored chain. Stop the enforcer and start it again and it resumes from the same place, after auditing the chain itself:
 
 ```bash
-./target/release/ethical-audit --store run/store --charter scenarios/charter.json --signature scenarios/charter.sig
+./target/release/ethical-audit --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig
 ```
 
 Run the tests:
@@ -123,14 +140,14 @@ Then give the agent any GGUF file. The recorded run used DeepSeek-R1 8B. The pro
 ./target/release/ethical-agent --socket run/s --situations scenarios/situations.json --llama .deps/llama.cpp/build/bin/llama-completion --model PATH_TO_MODEL.gguf --candidates 3 --record run/model_run.json
 ```
 
-On macOS, the recorded run had internet access denied to both programs, and the agent also denied any read of the seed or the store. To do the same, start the enforcer under the first profile and the agent under the second:
+On macOS, the recorded run had internet access denied to both programs, the agent also denied any read of the seed or the store, and any write to the world. To do the same, start the enforcer under the first profile and the agent under the second:
 
 ```bash
-sandbox-exec -p '(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))' ./target/release/ethical-enforcer --store run/store --charter scenarios/charter.json --signature scenarios/charter.sig --device-seed run/seed --socket run/s
+sandbox-exec -p '(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))' ./target/release/ethical-enforcer --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --device-seed run/seed --socket run/s
 ```
 
 ```bash
-sandbox-exec -p "(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))(deny file-read* (literal \"$PWD/run/seed\") (subpath \"$PWD/run/store\"))" ./target/release/ethical-agent --socket run/s --situations scenarios/situations.json --llama .deps/llama.cpp/build/bin/llama-completion --model PATH_TO_MODEL.gguf --candidates 3
+sandbox-exec -p "(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))(deny file-read* (literal \"$PWD/run/seed\") (subpath \"$PWD/run/store\"))(deny file-write* (subpath \"$PWD/run/world\"))" ./target/release/ethical-agent --socket run/s --situations scenarios/situations.json --llama .deps/llama.cpp/build/bin/llama-completion --model PATH_TO_MODEL.gguf --candidates 3
 ```
 
 ## Continuous integration

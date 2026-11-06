@@ -83,6 +83,7 @@ pub fn row(action: &str, displacement: [i64; 6], tags: &[&str]) -> CatalogRow {
         description: format!("{action} (test row)"),
         displacement: displacement.to_vec(),
         tags: tags.iter().map(|t| t.to_string()).collect(),
+        act: ethical_autonomy_adapter::act::Act::None,
     }
 }
 
@@ -132,6 +133,7 @@ pub fn propose(action: &str) -> Proposal {
     Proposal {
         action: action.to_string(),
         rationale: format!("I propose {action}"),
+        text: String::new(),
     }
 }
 
@@ -190,7 +192,7 @@ pub fn forge(parent: &AttestedState, action: &str, lies: Lies) -> StepRecord {
         commit::branch_commitment(
             &parent.tip,
             &policy,
-            &commit::proposal_commit(&proposal.action, &proposal.rationale),
+            &commit::proposal_commit(&proposal.action, &proposal.rationale, &proposal.text),
             Some(&row),
         )
     });

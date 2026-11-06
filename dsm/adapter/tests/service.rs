@@ -37,11 +37,17 @@ impl Place {
         self.dir.join("store")
     }
 
+    fn world(&self) -> PathBuf {
+        self.dir.join("world")
+    }
+
     fn enforcer(&self, charter: &Path) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_ethical-enforcer"));
         c.current_dir(root()).args([
             "--store",
             self.store().to_str().expect("path"),
+            "--world",
+            self.world().to_str().expect("path"),
             "--charter",
             charter.to_str().expect("path"),
             "--signature",
@@ -88,6 +94,8 @@ impl Place {
                 "scenarios/charter.json",
                 "--signature",
                 "scenarios/charter.sig",
+                "--world",
+                self.world().to_str().expect("path"),
             ])
             .output()
             .expect("run the audit")
@@ -321,7 +329,7 @@ fn a_client_cannot_choose_a_refused_candidate_or_one_from_a_closed_fork() {
         answer
     };
     let forked = ask(
-        r#"{"request":"propose","proposals":[{"action":"disable_safety_interlock","rationale":"faster"},{"action":"answer_directly","rationale":"plain"}]}"#,
+        r#"{"request":"propose","proposals":[{"action":"disable_safety_interlock","rationale":"faster"},{"action":"answer_directly","rationale":"plain","text":"Switch off the breaker first."}]}"#,
     );
     let root: String = forked
         .split("\"fork_root\":\"")
@@ -388,9 +396,24 @@ fn the_agent_works_without_any_access_to_the_key() {
     let place = Place::new("sandboxed");
     let _e = place.start();
     let profile = format!(
-        "(version 1)(allow default)(deny network-outbound (remote ip))(deny file-read* (literal \"{}\") (subpath \"{}\"))",
+        "(version 1)(allow default)(deny network-outbound (remote ip))(deny file-read* (literal \"{}\") (subpath \"{}\"))(deny file-write* (subpath \"{}\"))",
         place.dir.join("seed").display(),
-        place.store().display()
+        place.store().display(),
+        place.world().display()
+    );
+    std::fs::create_dir_all(place.world()).expect("world");
+    let touch = Command::new("sandbox-exec")
+        .args([
+            "-p",
+            &profile,
+            "touch",
+            place.world().join("direct.txt").to_str().unwrap(),
+        ])
+        .output()
+        .expect("touch");
+    assert!(
+        !touch.status.success(),
+        "the sandbox must deny writing the world directly"
     );
     let cat = Command::new("sandbox-exec")
         .args([
@@ -416,4 +439,50 @@ fn the_agent_works_without_any_access_to_the_key() {
     assert!(out.status.success(), "{}", text(&out));
     assert!(String::from_utf8_lossy(&out.stdout)
         .contains("every committed step verified from its parent"));
+}
+
+/// Only committed steps act, and the world holds nothing else.
+#[test]
+fn every_committed_step_acts_and_nothing_refused_leaves_a_trace() {
+    let place = Place::new("world");
+    let _e = place.start();
+    let out = scripted(&place);
+    let wrote: Vec<&str> = out
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("acted: wrote "))
+        .collect();
+    assert!(wrote.iter().any(|p| p.starts_with("replies/")), "{out}");
+    assert!(wrote.iter().any(|p| p.starts_with("journal/")), "{out}");
+    assert!(wrote.iter().any(|p| p.starts_with("outbox/user/")), "{out}");
+    assert!(
+        wrote.iter().any(|p| p.starts_with("outbox/reviewer/")),
+        "{out}"
+    );
+    assert!(wrote.iter().any(|p| p.starts_with("files/")), "{out}");
+    assert!(wrote.iter().any(|p| p.starts_with("runs/")), "{out}");
+    for path in &wrote {
+        assert!(place.world().join(path).exists(), "{path}");
+    }
+    // Refused in situation 1, so it never ran: the interlock file was never written.
+    assert!(!place.world().join("files/interlock.txt").exists());
+    let audit = place.audit();
+    let report = text(&audit);
+    assert!(audit.status.success(), "{report}");
+    assert!(report.contains("the world holds exactly the"), "{report}");
+}
+
+#[test]
+fn a_file_placed_in_the_world_by_anything_else_fails_the_audit() {
+    let place = Place::new("smuggled");
+    let first = place.start();
+    scripted(&place);
+    drop(first);
+    std::fs::write(place.world().join("files/interlock.txt"), "off").expect("write");
+    let audit = place.audit();
+    assert!(!audit.status.success());
+    assert!(
+        text(&audit).contains("no committed action wrote it"),
+        "{}",
+        text(&audit)
+    );
 }

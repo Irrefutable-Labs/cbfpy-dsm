@@ -2,6 +2,7 @@
 //! before the enforcer installs it. Nothing read back is trusted: a store is audited in full and
 //! replayed through core before an enforcer resumes from it.
 
+use crate::act::EffectReceipt;
 use crate::enforcer::{AdapterError, AttestedState, StepRecord};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
@@ -13,6 +14,14 @@ use std::path::{Path, PathBuf};
 enum Entry {
     Genesis(Box<AttestedState>),
     Step(Box<StepRecord>),
+    Effect(Box<EffectReceipt>),
+}
+
+/// A stored chain as read back, not yet trusted.
+pub struct Stored {
+    pub genesis: AttestedState,
+    pub steps: Vec<StepRecord>,
+    pub receipts: Vec<EffectReceipt>,
 }
 
 pub struct ChainStore {
@@ -70,15 +79,24 @@ impl ChainStore {
         Self::write_line(&mut file, &Entry::Step(Box::new(step.clone())))
     }
 
+    pub fn append_receipt(&self, receipt: &EffectReceipt) -> Result<(), AdapterError> {
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(self.chain())
+            .map_err(io)?;
+        Self::write_line(&mut file, &Entry::Effect(Box::new(receipt.clone())))
+    }
+
     pub fn device_public(&self) -> Result<Vec<u8>, AdapterError> {
         let text = std::fs::read_to_string(self.device()).map_err(io)?;
         crate::hexser::decode(text.trim()).map_err(AdapterError::BadStore)
     }
 
-    pub fn load(&self) -> Result<(AttestedState, Vec<StepRecord>), AdapterError> {
+    pub fn load(&self) -> Result<Stored, AdapterError> {
         let file = File::open(self.chain()).map_err(io)?;
         let mut genesis = None;
         let mut steps = Vec::new();
+        let mut receipts = Vec::new();
         for (n, line) in BufReader::new(file).lines().enumerate() {
             let line = line.map_err(io)?;
             let entry: Entry = serde_json::from_str(&line)
@@ -86,6 +104,14 @@ impl ChainStore {
             match (entry, n) {
                 (Entry::Genesis(g), 0) => genesis = Some(*g),
                 (Entry::Step(s), n) if n > 0 => steps.push(*s),
+                // A receipt comes after its own step, and receipts come in order.
+                (Entry::Effect(r), n)
+                    if n > 0
+                        && r.sequence as usize == receipts.len() + 1
+                        && r.sequence as usize <= steps.len() =>
+                {
+                    receipts.push(*r)
+                }
                 _ => {
                     return Err(AdapterError::BadStore(format!(
                         "line {}: out of place",
@@ -95,6 +121,10 @@ impl ChainStore {
             }
         }
         let genesis = genesis.ok_or(AdapterError::BadStore("the store is empty".to_string()))?;
-        Ok((genesis, steps))
+        Ok(Stored {
+            genesis,
+            steps,
+            receipts,
+        })
     }
 }

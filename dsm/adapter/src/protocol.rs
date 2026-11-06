@@ -30,6 +30,8 @@ pub enum Request {
 pub struct MenuItem {
     pub action: String,
     pub description: String,
+    /// Whether choosing it needs a text: what it will say or write.
+    pub needs_text: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +66,8 @@ pub enum Response {
         tip: String,
         decision: String,
         verified: bool,
+        /// What the act wrote in the world, by path.
+        effects: Vec<String>,
     },
     Refused {
         reason: String,

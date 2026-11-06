@@ -28,6 +28,8 @@ pub enum AdapterError {
     StaleFuture,
     /// A stored chain that does not verify, or does not replay to the same DSM head.
     BadStore(String),
+    /// An act could not be carried out, or the world is not what the receipts say.
+    Effect(String),
     Dsm(String),
     Config(String),
 }
@@ -46,6 +48,9 @@ impl std::error::Error for AdapterError {}
 pub struct Proposal {
     pub action: String,
     pub rationale: String,
+    /// The text the action's act carries, when it carries any. Bound into the fork.
+    #[serde(default)]
+    pub text: String,
 }
 
 impl Proposal {
@@ -60,6 +65,7 @@ impl Proposal {
         if self.action.is_empty()
             || self.action.len() > MAX_ACTION_BYTES
             || self.rationale.len() > MAX_RATIONALE_BYTES
+            || self.text.len() > crate::act::MAX_TEXT
         {
             return Err(AdapterError::Config("proposal out of bounds".to_string()));
         }
@@ -73,6 +79,8 @@ pub enum FutureStatus {
     Rejected(Evaluation),
     /// Not in the signed catalog, so there is nothing to evaluate.
     Unmeasured,
+    /// Its text does not fit its act.
+    Malformed,
 }
 
 /// One pre-commit branch from the parent, carrying the whole fork it belongs to. It is a claim
@@ -326,6 +334,20 @@ impl Enforcer {
         &self.device.public
     }
 
+    /// Sign what a committed step did in the world.
+    pub fn sign_receipt(
+        &self,
+        step: &StepRecord,
+        outputs: Vec<crate::act::Output>,
+    ) -> Result<crate::act::EffectReceipt, AdapterError> {
+        crate::act::EffectReceipt::sign(
+            step.successor.sequence,
+            step.decision_commit,
+            outputs,
+            &self.device,
+        )
+    }
+
     fn records_for(&self, proposals: &[Proposal]) -> Vec<(CandidateRecord, Option<Evaluation>)> {
         proposals
             .iter()
@@ -350,6 +372,7 @@ impl Enforcer {
                 branch_commitment: record.branch,
                 status: match (record.outcome, evaluation) {
                     (Outcome::Eligible, Some(e)) => FutureStatus::Eligible(e),
+                    (Outcome::Malformed, _) => FutureStatus::Malformed,
                     (_, Some(e)) => FutureStatus::Rejected(e),
                     (_, None) => FutureStatus::Unmeasured,
                 },
@@ -508,6 +531,32 @@ pub struct Audit {
     /// unmeasured.
     pub forks: Vec<(usize, usize, usize)>,
     machine: StateMachine,
+}
+
+/// Every receipt must be signed by the device and name the decision of the step it follows.
+/// Returns how many steps have not yet had their act carried out: those after the last receipt.
+pub fn check_receipts(
+    device_public: &[u8],
+    steps: &[StepRecord],
+    receipts: &[crate::act::EffectReceipt],
+) -> Result<usize, AdapterError> {
+    if receipts.len() > steps.len() {
+        return Err(AdapterError::BadStore(
+            "more receipts than steps".to_string(),
+        ));
+    }
+    for (n, (step, receipt)) in steps.iter().zip(receipts).enumerate() {
+        if receipt.sequence != step.successor.sequence
+            || receipt.decision_commit != step.decision_commit
+            || !receipt.is_signed_by(device_public)
+        {
+            return Err(AdapterError::BadStore(format!(
+                "the receipt for step {} does not match it",
+                n + 1
+            )));
+        }
+    }
+    Ok(steps.len() - receipts.len())
 }
 
 /// Check a whole stored chain with only public material: the genesis against core's own genesis

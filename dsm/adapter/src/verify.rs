@@ -118,13 +118,20 @@ pub fn verify_step(
     let branch = commit::branch_commitment(
         &parent.tip,
         &policy,
-        &commit::proposal_commit(&step.proposal.action, &step.proposal.rationale),
+        &commit::proposal_commit(
+            &step.proposal.action,
+            &step.proposal.rationale,
+            &step.proposal.text,
+        ),
         Some(&step.row),
     );
     if branch != step.branch_commitment {
         return Err(Refusal::BranchCommitmentMismatch);
     }
 
+    if !step.row.act.accepts_text(&step.proposal.text) {
+        return Err(Refusal::NotEligible);
+    }
     // Run the deterministic rules again. Nothing the step claims about them is believed.
     let evaluation = evaluate(&charter.policy, &parent.positions, &step.row.measurement());
     if !evaluation.is_eligible() {

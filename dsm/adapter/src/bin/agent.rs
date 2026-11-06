@@ -98,9 +98,9 @@ fn chat(body: &str) -> String {
     format!("<｜User｜>{body}<｜Assistant｜><think>\n\n</think>\n\n")
 }
 
-const PROPOSAL_GRAMMAR: &str = r#"root ::= "{\"action\":\"" id "\",\"rationale\":\"" text "\"}"
+const PROPOSAL_GRAMMAR: &str = r#"root ::= "{\"action\":\"" id "\",\"rationale\":\"" text "\",\"text\":\"" text "\"}"
 id ::= [a-z_]{2,48}
-text ::= [a-zA-Z0-9 ,.;:()-]{1,240}"#;
+text ::= [a-zA-Z0-9 ,.;:()'?!-]{1,240}"#;
 
 fn generate(
     model: &Model,
@@ -111,7 +111,10 @@ fn generate(
 ) -> Result<RecordedTurn, String> {
     let known = menu
         .iter()
-        .map(|m| format!("- {}: {}", m.action, m.description))
+        .map(|m| {
+            let what = if m.needs_text { " (needs text)" } else { "" };
+            format!("- {}: {}{what}", m.action, m.description)
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let ask = if guidance.is_empty() {
@@ -129,7 +132,8 @@ fn generate(
     };
     let prompt = chat(&format!(
         "You are an AI deciding what to do next. {ask}\n\nSituation: {title}\n\nKnown \
-         actions:\n{known}\n\nPropose one action as JSON with the fields action and rationale."
+         actions:\n{known}\n\nPropose one action as JSON with the fields action, rationale, and text: the exact words \
+         the action will say or write, if it needs any."
     ));
     // A first proposal may name anything, so the model can invent. Once it has been refused, a
     // retry may only name a known action: guidance alone did not stop an 8B model from writing
@@ -143,7 +147,7 @@ fn generate(
             .collect::<Vec<_>>()
             .join(" | ");
         format!(
-            "root ::= \"{{\\\"action\\\":\\\"\" id \"\\\",\\\"rationale\\\":\\\"\" text \"\\\"}}\"\nid ::= {names}\ntext ::= [a-zA-Z0-9 ,.;:()-]{{1,240}}"
+            "root ::= \"{{\\\"action\\\":\\\"\" id \"\\\",\\\"rationale\\\":\\\"\" text \"\\\",\\\"text\\\":\\\"\" text \"\\\"}}\"\nid ::= {names}\ntext ::= [a-zA-Z0-9 ,.;:()'?!-]{{1,240}}"
         )
     };
     let mut proposals = vec![];
@@ -200,7 +204,7 @@ fn model_choice(
 fn show(f: &FutureReport) {
     let verdict = match f.outcome {
         Outcome::Eligible => "eligible",
-        Outcome::Refused | Outcome::Unmeasured => "REFUSED",
+        Outcome::Refused | Outcome::Unmeasured | Outcome::Malformed => "REFUSED",
     };
     println!("    {:<28} {verdict}", f.action);
     for m in &f.movements {
@@ -424,6 +428,7 @@ fn run() -> Result<(), String> {
                         tip,
                         decision,
                         verified: ok,
+                        effects,
                         ..
                     } => {
                         committed += 1;
@@ -433,6 +438,12 @@ fn run() -> Result<(), String> {
                         println!(
                             "   committed: {action}, with all {fork_size} candidates in the fork\n   tip {tip}\n   decision {decision}\n   verified from its parent alone"
                         );
+                        if effects.is_empty() {
+                            println!("   acted: nothing outside the chain");
+                        }
+                        for e in effects {
+                            println!("   acted: wrote {e}");
+                        }
                     }
                     Response::Refused { reason } => {
                         println!("   the enforcer refused it: {reason}")

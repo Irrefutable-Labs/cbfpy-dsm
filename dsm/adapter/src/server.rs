@@ -1,7 +1,9 @@
-//! The enforcer as a service. It owns the keys, the chain and the DSM head. A client can only
-//! ask for the menu and the state, propose, and choose among what it was told is eligible.
+//! The enforcer as a service. It owns the keys, the chain, the DSM head and the world. A client
+//! can only ask for the menu and the state, propose, and choose among what it was told is
+//! eligible. Only a committed step acts on the world, and only through `act::perform`.
 
-use crate::enforcer::{AdapterError, Enforcer, Future, FutureStatus};
+use crate::act::{perform, EffectReceipt};
+use crate::enforcer::{AdapterError, Enforcer, Future, FutureStatus, StepRecord};
 use crate::hexser::{decode, to_hex};
 use crate::protocol::{receive, send, MenuItem, Position, Request, Response};
 use crate::report::report;
@@ -9,23 +11,57 @@ use crate::store::ChainStore;
 use crate::verify::verify_step;
 use std::io::BufReader;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
 
 pub struct Service {
     enforcer: Enforcer,
     store: ChainStore,
+    world: PathBuf,
     trusted_authority: Vec<u8>,
     /// The fork most recently proposed. Any commit closes it.
     open: Option<Vec<Future>>,
 }
 
 impl Service {
-    pub fn new(enforcer: Enforcer, store: ChainStore, trusted_authority: Vec<u8>) -> Self {
-        Service {
+    /// Start serving. Any committed step whose act has no receipt yet, which can only follow a
+    /// stop between committing and acting, has its act carried out first. Acts are idempotent,
+    /// so this writes the same bytes the interrupted act would have.
+    pub fn start(
+        enforcer: Enforcer,
+        store: ChainStore,
+        world: PathBuf,
+        trusted_authority: Vec<u8>,
+        steps: &[StepRecord],
+        receipts: usize,
+    ) -> Result<Self, AdapterError> {
+        std::fs::create_dir_all(&world).map_err(|e| AdapterError::Effect(e.to_string()))?;
+        let service = Service {
             enforcer,
             store,
+            world,
             trusted_authority,
             open: None,
+        };
+        for step in &steps[receipts..] {
+            let receipt = service.act(step)?;
+            eprintln!(
+                "carried out the act of step {} after the restart",
+                receipt.sequence
+            );
         }
+        Ok(service)
+    }
+
+    fn act(&self, step: &StepRecord) -> Result<EffectReceipt, AdapterError> {
+        let outputs = perform(
+            &self.world,
+            step.successor.sequence,
+            &step.row.act,
+            &step.proposal.text,
+        )?;
+        let receipt = self.enforcer.sign_receipt(step, outputs)?;
+        self.store.append_receipt(&receipt)?;
+        Ok(receipt)
     }
 
     pub fn handle(&mut self, request: Request) -> Response {
@@ -40,6 +76,7 @@ impl Service {
                     .map(|r| MenuItem {
                         action: r.action.clone(),
                         description: r.description.clone(),
+                        needs_text: r.act.needs_text(),
                     })
                     .collect(),
             },
@@ -82,7 +119,7 @@ impl Service {
                         FutureStatus::Eligible(e) | FutureStatus::Rejected(e) => {
                             Some(e.fired_rules.clone())
                         }
-                        FutureStatus::Unmeasured => None,
+                        FutureStatus::Unmeasured | FutureStatus::Malformed => None,
                     })
                     .unwrap_or_default();
                 let response = Response::Forked {
@@ -124,23 +161,36 @@ impl Service {
                 .map_err(|r| AdapterError::BadStore(format!("own step did not verify: {r:?}")))?;
             store.append(step)
         });
-        match result {
-            Ok(step) => Response::Committed {
+        let step = match result {
+            Ok(step) => step,
+            Err(AdapterError::NotEligible) => {
+                self.open = Some(futures);
+                return Response::Refused {
+                    reason: "that candidate is not eligible".to_string(),
+                };
+            }
+            Err(e) => {
+                return Response::Error {
+                    message: e.to_string(),
+                }
+            }
+        };
+        // Only now, with the step committed and stored, does anything happen in the world.
+        match self.act(&step) {
+            Ok(receipt) => Response::Committed {
                 sequence: step.successor.sequence,
                 action: step.proposal.action.clone(),
                 fork_size: step.fork.len(),
                 tip: to_hex(&step.successor.tip),
                 decision: to_hex(&step.decision_commit),
                 verified: true,
+                effects: receipt.outputs.iter().map(|o| o.path.clone()).collect(),
             },
-            Err(AdapterError::NotEligible) => {
-                self.open = Some(futures);
-                Response::Refused {
-                    reason: "that candidate is not eligible".to_string(),
-                }
-            }
             Err(e) => Response::Error {
-                message: e.to_string(),
+                message: format!(
+                    "step {} is committed, and its act failed and will be retried at the next start: {e}",
+                    step.successor.sequence
+                ),
             },
         }
     }
