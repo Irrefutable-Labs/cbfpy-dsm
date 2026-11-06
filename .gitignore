@@ -5,3 +5,8 @@ site/
 .vscode/
 dist/
 build/
+# The DSM side
+dsm/target/
+dsm/.deps/
+dsm/lean/.lake/
+.venv/

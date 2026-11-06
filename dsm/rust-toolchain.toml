@@ -1,0 +1,5 @@
+# The same Rust as DSM's own `rust-toolchain.toml` at the pinned commit.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

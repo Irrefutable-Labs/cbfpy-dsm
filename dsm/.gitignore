@@ -1,0 +1,5 @@
+/.deps/
+/.venv/
+/target/
+/lean/.lake/
+__pycache__/

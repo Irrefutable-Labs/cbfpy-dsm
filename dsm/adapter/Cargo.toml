@@ -1,0 +1,26 @@
+[package]
+name = "ethical-autonomy-adapter"
+description = "Experimental binding of ethical band decisions to existing DSM state transitions."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ethical-band-engine = { path = "../engine" }
+# DSM, used through its public API only, pinned to the commit this was built and verified on.
+dsm = { git = "https://github.com/deterministicstatemachine/dsm", rev = "b6060a3349ead0ccbfd853cd74f1d058e323e2ba" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[[bin]]
+name = "ethical-demo"
+path = "src/bin/demo.rs"
+
+[[bin]]
+name = "ethical-sign-charter"
+path = "src/bin/sign_charter.rs"
+
+[[bin]]
+name = "ethical-trace"
+path = "src/bin/trace.rs"
