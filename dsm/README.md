@@ -161,6 +161,21 @@ sandbox-exec -p "(version 1)(allow default)(deny network-outbound (remote ip))(d
 
 `.github/workflows/dsm-ethical-autonomy.yml` runs the Rust tests, formatting and Clippy, the CBFpy cross-check and the Lean proofs on every push and pull request.
 
+## Foundations and operational permissions
+
+A charter has two parts:
+
+- **The foundation** is the prohibited acts and every band's hard limits. It is fixed when a chain begins, and no update can change it. The non-concealment invariant sits beside it, in code, and cannot be configured away.
+- **Operational permissions** are everything else: the bands inside the hard limits, the coupling rules and the catalog.
+
+An operational change is a new charter with a higher version, signed by the charter authority. The operator applies it by starting the enforcer with `--apply-update`, and it is recorded on the chain as its own step. An update that touches the foundation, does not raise the version, or lacks the authority's signature is refused. The AI has no route to any of this: the socket has no request that changes the charter.
+
+```bash
+./target/release/ethical-enforcer --store run/store --world run/world --charter scenarios/charter.v2.json --signature scenarios/charter.v2.sig --authority scenarios/authority.pub --device-seed run/seed --socket run/s --apply-update
+```
+
+`scenarios/charter.v2.json` is an example: version 2, with curiosity's limit widened, and the foundation unchanged. A store carries its genesis charter and every update in full, so the audit and the console need no charter file. They check each charter against the authority's key.
+
 ## Nothing may be hidden
 
 Any action that affects the world must come with a **declaration**: what the AI intends, the information it relied on, everyone and everything it affects, all it will do, and every material consequence the charter names for that action. The enforcer checks the declaration against its own description of the action, worked out from the signed charter, never against the AI's word.
@@ -183,7 +198,7 @@ This enforces that the AI declares, and that what it declares matches what the a
 `ethical-console` serves a live page on `127.0.0.1` only. It reads the store, the world, the charter and the public keys, holds no key and changes nothing, and works every verdict out again whenever the chain changes. Start it beside the enforcer:
 
 ```bash
-./target/release/ethical-console --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub --device run/store/device.pub
+./target/release/ethical-console --store run/store --world run/world --authority scenarios/authority.pub --device run/store/device.pub
 ```
 
 Then open http://127.0.0.1:8770/. It shows:

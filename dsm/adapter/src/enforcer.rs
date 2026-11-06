@@ -34,6 +34,13 @@ pub enum AdapterError {
     Config(String),
 }
 
+impl AdapterError {
+    /// The same refusal with its reason spelled out, as a configuration error.
+    pub fn with(self, why: String) -> AdapterError {
+        AdapterError::Config(format!("{self:?}: {why}"))
+    }
+}
+
 impl std::fmt::Display for AdapterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
@@ -293,15 +300,16 @@ impl Enforcer {
     }
 
     /// Rebuild an enforcer from a stored chain: audited in full, then this enforcer's own DSM
-    /// head is the one the audit's replay through core produced.
+    /// head is the one the audit's replay through core produced, and its charter is whichever
+    /// the chain's last update installed.
     pub fn resume(
         device: Keypair,
-        charter: SignedCharter,
+        genesis_charter: SignedCharter,
         trusted_authority: &[u8],
         genesis: &AttestedState,
-        steps: &[StepRecord],
+        links: &[Link],
     ) -> Result<Self, AdapterError> {
-        let mut e = Enforcer::genesis(device, charter, trusted_authority)?;
+        let mut e = Enforcer::genesis(device, genesis_charter, trusted_authority)?;
         if e.state != *genesis {
             return Err(AdapterError::BadStore(
                 "the stored genesis is not this device's genesis under this charter".to_string(),
@@ -312,11 +320,80 @@ impl Enforcer {
             &e.charter,
             trusted_authority,
             genesis,
-            steps,
+            links,
         )?;
+        e.charter = audit.current().clone();
         e.machine = audit.machine;
         e.state = audit.last;
         Ok(e)
+    }
+
+    /// Move to a new operational charter. Only the operator calls this, with a charter the
+    /// authority signed; the AI has no route to it. It is refused unless the new charter keeps
+    /// the foundation unchanged and raises the version. Positions do not move. `persist` sees
+    /// the update before it is installed.
+    pub fn apply_update(
+        &mut self,
+        new: SignedCharter,
+        trusted_authority: &[u8],
+        persist: impl FnOnce(&crate::update::UpdateRecord) -> Result<(), AdapterError>,
+    ) -> Result<crate::update::UpdateRecord, AdapterError> {
+        crate::update::may_follow(&self.charter, &new, trusted_authority)
+            .map_err(|r| AdapterError::BadCharter.with(format!("{r:?}")))?;
+        let (policy, catalog) = (new.policy_hash(), new.catalog_hash());
+        let sequence = self.state.sequence + 1;
+        let successor =
+            commit::successor_commit(sequence, &self.state.positions, &policy, &catalog);
+        let update_commit = crate::update::update_commit(&crate::update::UpdateFields {
+            parent_tip: &self.state.tip,
+            parent_state: &self.state.commitment(),
+            new_policy: &policy,
+            new_catalog: &catalog,
+            new_version: new.policy.version,
+            successor: &successor,
+        });
+        let dsm_error = |e: dsm::types::error::DsmError| AdapterError::Dsm(e.to_string());
+        let device_signature =
+            sphincs::sphincs_sign(&self.device.secret, &update_commit).map_err(dsm_error)?;
+        let operation = commit::decision_operation(
+            &update_commit,
+            &self.device.public,
+            &policy,
+            &successor,
+            &device_signature,
+        );
+        let derived = derive_transition_entropy(&self.state, &operation);
+        let outcome = self
+            .machine
+            .prepare_advance_relationship(self.rel_key, self.devid, operation, &[], None)
+            .map_err(dsm_error)?;
+        let (consumed, produced) = outcome.relationship_pair();
+        if consumed != self.state.tip || outcome.transition_entropy() != derived {
+            return Err(AdapterError::StaleFuture);
+        }
+        let next = AttestedState::attest(
+            sequence,
+            produced,
+            self.state.positions.clone(),
+            policy,
+            catalog,
+            derived,
+            produced,
+            &self.device,
+        )?;
+        let record = crate::update::UpdateRecord {
+            parent_tip: self.state.tip,
+            charter_text: crate::config::charter_config_text(&new.policy, &new.catalog),
+            charter_signature: new.signature.clone(),
+            update_commit,
+            device_signature,
+            successor: next.clone(),
+        };
+        persist(&record)?;
+        self.machine.commit_advance(&outcome);
+        self.state = next;
+        self.charter = new;
+        Ok(record)
     }
 
     pub fn tip(&self) -> Hash {
@@ -561,6 +638,48 @@ impl Enforcer {
     }
 }
 
+/// One link of a stored chain: a step the AI took, or a change of operational charter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Link {
+    Step(Box<StepRecord>),
+    Update(Box<crate::update::UpdateRecord>),
+}
+
+impl Link {
+    pub fn successor(&self) -> &AttestedState {
+        match self {
+            Link::Step(s) => &s.successor,
+            Link::Update(u) => &u.successor,
+        }
+    }
+
+    pub fn as_step(&self) -> Option<&StepRecord> {
+        match self {
+            Link::Step(s) => Some(s),
+            Link::Update(_) => None,
+        }
+    }
+}
+
+/// Steps alone, as links.
+pub fn steps_as_links(steps: &[StepRecord]) -> Vec<Link> {
+    steps
+        .iter()
+        .map(|s| Link::Step(Box::new(s.clone())))
+        .collect()
+}
+
+/// The steps whose acts have not been carried out: those after the last receipt.
+pub fn pending_steps(links: &[Link], receipts: &[crate::act::EffectReceipt]) -> Vec<StepRecord> {
+    let done = receipts.last().map_or(0, |r| r.sequence);
+    links
+        .iter()
+        .filter_map(Link::as_step)
+        .filter(|s| s.successor.sequence > done)
+        .cloned()
+        .collect()
+}
+
 /// What an audit established about a stored chain.
 pub struct Audit {
     pub last: AttestedState,
@@ -568,17 +687,27 @@ pub struct Audit {
     /// For each step: how many candidates were considered, and how many of them were refused or
     /// unmeasured.
     pub forks: Vec<(usize, usize, usize)>,
+    /// The charter that governed each state, from genesis to the last.
+    pub charters: Vec<SignedCharter>,
     machine: StateMachine,
 }
 
-/// Every receipt must be signed by the device, name the decision of the step it follows, and
-/// list exactly what that step's act writes.
-/// Returns how many steps have not yet had their act carried out: those after the last receipt.
+impl Audit {
+    /// The charter in force now.
+    pub fn current(&self) -> &SignedCharter {
+        &self.charters[self.charters.len() - 1]
+    }
+}
+
+/// Every receipt must be signed by the device, name the decision of a step, and list exactly
+/// what that step's act writes. Every step up to the last receipt must have one. Returns how
+/// many steps have not yet had their act carried out: those after the last receipt.
 pub fn check_receipts(
     device_public: &[u8],
-    steps: &[StepRecord],
+    links: &[Link],
     receipts: &[crate::act::EffectReceipt],
 ) -> Result<usize, AdapterError> {
+    let steps: Vec<&StepRecord> = links.iter().filter_map(Link::as_step).collect();
     if receipts.len() > steps.len() {
         return Err(AdapterError::BadStore(
             "more receipts than steps".to_string(),
@@ -605,17 +734,17 @@ pub fn check_receipts(
 }
 
 /// Check a whole stored chain with only public material: the genesis against core's own genesis
-/// head, each step from its one parent, and each step replayed through core's transition so the
-/// DSM head is rebuilt rather than read from the store.
+/// head, each step and each charter update from its one parent under the charter then in force,
+/// and each replayed through core's transition so the DSM head is rebuilt rather than read.
 pub fn audit_chain(
     device_public: &[u8],
-    charter: &SignedCharter,
+    genesis_charter: &SignedCharter,
     trusted_authority: &[u8],
     genesis: &AttestedState,
-    steps: &[StepRecord],
+    links: &[Link],
 ) -> Result<Audit, AdapterError> {
-    charter.verify(trusted_authority)?;
-    crate::verify::verify_genesis(genesis, charter, device_public)
+    genesis_charter.verify(trusted_authority)?;
+    crate::verify::verify_genesis(genesis, genesis_charter, device_public)
         .map_err(|r| AdapterError::BadStore(format!("the genesis does not verify: {r:?}")))?;
     let (devid, genesis_digest, rel_key) = identity_of(device_public);
     let mut machine = StateMachine::new();
@@ -625,80 +754,102 @@ pub fn audit_chain(
         device_public.to_vec(),
     ));
     let mut state = genesis.clone();
-    let mut forks = Vec::with_capacity(steps.len());
-    for (n, step) in steps.iter().enumerate() {
-        verify_step(&state, step, charter, trusted_authority, device_public).map_err(|r| {
-            AdapterError::BadStore(format!("step {} does not verify: {r:?}", n + 1))
-        })?;
+    let mut charters = vec![genesis_charter.clone()];
+    let mut forks = Vec::new();
+    for (n, link) in links.iter().enumerate() {
+        let charter = charters[charters.len() - 1].clone();
+        let (decision, signature) = match link {
+            Link::Step(step) => {
+                verify_step(&state, step, &charter, trusted_authority, device_public).map_err(
+                    |r| AdapterError::BadStore(format!("link {} does not verify: {r:?}", n + 1)),
+                )?;
+                let count = |o: Outcome| step.fork.iter().filter(|r| r.outcome == o).count();
+                forks.push((
+                    step.fork.len(),
+                    count(Outcome::Refused),
+                    count(Outcome::Unmeasured),
+                ));
+                charters.push(charter.clone());
+                (step.decision_commit, step.decision_signature.clone())
+            }
+            Link::Update(update) => {
+                let new = crate::update::verify_update(
+                    &state,
+                    update,
+                    &charter,
+                    trusted_authority,
+                    device_public,
+                )
+                .map_err(|r| {
+                    AdapterError::BadStore(format!(
+                        "charter update at link {} refused: {r:?}",
+                        n + 1
+                    ))
+                })?;
+                charters.push(new);
+                (update.update_commit, update.device_signature.clone())
+            }
+        };
+        let next = link.successor();
         let operation = commit::decision_operation(
-            &step.decision_commit,
+            &decision,
             device_public,
-            &state.policy_hash,
+            &next.policy_hash,
             &commit::successor_commit(
-                step.successor.sequence,
-                &step.successor.positions,
-                &state.policy_hash,
-                &state.catalog_hash,
+                next.sequence,
+                &next.positions,
+                &next.policy_hash,
+                &next.catalog_hash,
             ),
-            &step.decision_signature,
+            &signature,
         );
         let outcome = machine
             .prepare_advance_relationship(rel_key, devid, operation, &[], None)
             .map_err(|err| AdapterError::Dsm(err.to_string()))?;
-        if outcome.relationship_pair().1 != step.successor.tip {
+        if outcome.relationship_pair().1 != next.tip {
             return Err(AdapterError::BadStore(format!(
-                "step {} does not replay to its tip through core",
+                "link {} does not replay to its tip through core",
                 n + 1
             )));
         }
         machine.commit_advance(&outcome);
-        let refused = step
-            .fork
-            .iter()
-            .filter(|r| r.outcome == Outcome::Refused)
-            .count();
-        let unmeasured = step
-            .fork
-            .iter()
-            .filter(|r| r.outcome == Outcome::Unmeasured)
-            .count();
-        forks.push((step.fork.len(), refused, unmeasured));
-        state = step.successor.clone();
+        state = next.clone();
     }
     let dsm_root = machine.device_head().map_or([0; 32], |h| h.root());
     Ok(Audit {
         last: state,
         dsm_root,
         forks,
+        charters,
         machine,
     })
 }
 
 /// Each considered fork must be signed by the device, name the parent it was put forward at,
-/// and hold exactly what that parent makes of each of its candidates. `considered` pairs each
-/// fork with the number of steps stored before it. Returns how many candidates they hold, and
-/// how many of those were refused, unmeasured or malformed.
+/// and hold exactly what that parent, under the charter then in force, makes of each of its
+/// candidates. `considered` pairs each fork with the number of links stored before it, and
+/// `charters` is the charter governing each state, as [`Audit::charters`] gives it. Returns how
+/// many candidates they hold, and how many of those were not eligible.
 pub fn check_considered(
     device_public: &[u8],
-    charter: &SignedCharter,
+    charters: &[SignedCharter],
     genesis: &AttestedState,
-    steps: &[StepRecord],
+    links: &[Link],
     considered: &[(usize, crate::fork::ConsideredFork)],
 ) -> Result<(usize, usize), AdapterError> {
     let (mut candidates, mut refused) = (0, 0);
     for (n, (after, fork)) in considered.iter().enumerate() {
+        let bad = |why: &str| AdapterError::BadStore(format!("considered fork {}: {why}", n + 1));
         let parent = match after {
             0 => genesis,
-            k => {
-                &steps
-                    .get(k - 1)
-                    .ok_or_else(|| {
-                        AdapterError::BadStore("a considered fork after no step".to_string())
-                    })?
-                    .successor
-            }
+            k => links
+                .get(k - 1)
+                .ok_or_else(|| bad("after no link"))?
+                .successor(),
         };
-        let bad = |why: &str| AdapterError::BadStore(format!("considered fork {}: {why}", n + 1));
+        let charter = charters
+            .get(*after)
+            .ok_or_else(|| bad("under no charter"))?;
         if fork.records.is_empty() || fork.records.len() > MAX_FORK {
             return Err(bad("empty or too wide"));
         }

@@ -10,6 +10,11 @@
 //!
 //! The world directory is where committed actions take effect, and nowhere else.
 //!
+//! A store carries the charter it began under and every update since. For an existing store,
+//! `--charter` must be the charter it is under now. To move it to a new operational charter,
+//! signed by the authority and keeping the foundation unchanged, start with `--apply-update`;
+//! the update is recorded on the chain before anything is served. The AI has no route to this.
+//!
 //! The device seed file must be readable by its owner alone. A store that exists is audited in
 //! full and replayed through core before anything is served. One that does not verify stops it.
 
@@ -18,7 +23,7 @@ use ethical_autonomy_adapter::keys::{read_public_key, read_secret_seed};
 use ethical_autonomy_adapter::server::Service;
 use ethical_autonomy_adapter::store::ChainStore;
 use ethical_autonomy_adapter::{
-    check_receipts, keypair_from_seed, parse_charter_config, Enforcer, SignedCharter,
+    check_receipts, keypair_from_seed, parse_charter_config, pending_steps, Enforcer, SignedCharter,
 };
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
@@ -33,6 +38,7 @@ struct Args {
     socket: PathBuf,
     authority: PathBuf,
     agent_uid: Option<u32>,
+    apply_update: bool,
 }
 
 fn args() -> Result<Args, String> {
@@ -40,7 +46,12 @@ fn args() -> Result<Args, String> {
     let (mut store, mut world, mut charter, mut signature, mut seed, mut socket) =
         (None, None, None, None, None, None);
     let (mut authority, mut agent_uid) = (None, None);
+    let mut apply_update = false;
     while let Some(flag) = a.next() {
+        if flag == "--apply-update" {
+            apply_update = true;
+            continue;
+        }
         let value = a
             .next()
             .map(PathBuf::from)
@@ -73,6 +84,7 @@ fn args() -> Result<Args, String> {
         socket: socket.ok_or("--socket is required")?,
         authority: authority.ok_or("--authority is required")?,
         agent_uid,
+        apply_update,
     })
 }
 
@@ -114,36 +126,65 @@ fn run() -> Result<(), String> {
     }
     let store = ChainStore::open(&args.store).map_err(|e| e.to_string())?;
     let _lock = store.lock().map_err(|e| e.to_string())?;
-    let (enforcer, steps, receipts) = if store.exists() {
+    let (enforcer, pending) = if store.exists() {
         store.drop_torn_tail().map_err(|e| e.to_string())?;
         let stored = store.load().map_err(|e| e.to_string())?;
-        let e = Enforcer::resume(device, charter, &trusted, &stored.genesis, &stored.steps)
-            .map_err(|e| format!("the stored chain was refused: {e}"))?;
-        check_receipts(e.device_public(), &stored.steps, &stored.receipts)
+        let mut e = Enforcer::resume(
+            device,
+            stored.genesis_charter.clone(),
+            &trusted,
+            &stored.genesis,
+            &stored.links,
+        )
+        .map_err(|e| format!("the stored chain was refused: {e}"))?;
+        check_receipts(e.device_public(), &stored.links, &stored.receipts)
             .map_err(|e| format!("the stored chain was refused: {e}"))?;
         eprintln!(
-            "resumed at step {} after auditing every step",
-            e.state().sequence
+            "resumed at step {} after auditing every step, under charter version {}",
+            e.state().sequence,
+            e.charter().policy.version
         );
-        (e, stored.steps, stored.receipts.len())
+        let pending = pending_steps(&stored.links, &stored.receipts);
+        if charter.policy_hash() != e.charter().policy_hash()
+            || charter.catalog_hash() != e.charter().catalog_hash()
+        {
+            if !args.apply_update {
+                return Err(format!(
+                    "the store is under charter version {}, not the one given; start with --apply-update to move it to this charter",
+                    e.charter().policy.version
+                ));
+            }
+            if !pending.is_empty() {
+                return Err(
+                    "an act is outstanding; start once without --apply-update to finish it"
+                        .to_string(),
+                );
+            }
+            let record = e
+                .apply_update(charter, &trusted, |u| store.append_update(u))
+                .map_err(|e| format!("the update was refused: {e}"))?;
+            eprintln!(
+                "moved to charter version {} at step {}, keeping the foundation",
+                e.charter().policy.version,
+                record.successor.sequence
+            );
+        } else if args.apply_update {
+            return Err(
+                "--apply-update was given, but the store is already under this charter".to_string(),
+            );
+        }
+        (e, pending)
     } else {
-        let e = Enforcer::genesis(device, charter, &trusted).map_err(|e| e.to_string())?;
+        let e = Enforcer::genesis(device, charter.clone(), &trusted).map_err(|e| e.to_string())?;
         store
-            .begin(&e.state(), e.device_public())
+            .begin(&e.state(), e.device_public(), &charter)
             .map_err(|e| e.to_string())?;
         eprintln!("began a new chain");
-        (e, vec![], 0)
+        (e, vec![])
     };
     let tip = enforcer.tip();
-    let mut service = Service::start(
-        enforcer,
-        store,
-        args.world.clone(),
-        trusted,
-        &steps,
-        receipts,
-    )
-    .map_err(|e| e.to_string())?;
+    let mut service = Service::start(enforcer, store, args.world.clone(), trusted, &pending)
+        .map_err(|e| e.to_string())?;
     let socket_mode = match args.agent_uid {
         Some(uid) => {
             service = service.only_for(uid).map_err(|e| e.to_string())?;

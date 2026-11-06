@@ -311,20 +311,40 @@ fn a_receipt_is_signed_and_tied_to_its_step() {
     let rb = e.sign_receipt(&b, ob).expect("receipt");
     let steps = [a, b];
     assert_eq!(
-        check_receipts(&keys().device.public, &steps, &[ra.clone(), rb.clone()]).expect("ok"),
+        check_receipts(
+            &keys().device.public,
+            &ethical_autonomy_adapter::steps_as_links(&steps),
+            &[ra.clone(), rb.clone()]
+        )
+        .expect("ok"),
         0
     );
     assert_eq!(
-        check_receipts(&keys().device.public, &steps, std::slice::from_ref(&ra)).expect("ok"),
+        check_receipts(
+            &keys().device.public,
+            &ethical_autonomy_adapter::steps_as_links(&steps),
+            std::slice::from_ref(&ra)
+        )
+        .expect("ok"),
         1
     );
-    assert!(check_receipts(&keys().device.public, &steps, &[rb.clone(), ra.clone()]).is_err());
+    assert!(check_receipts(
+        &keys().device.public,
+        &ethical_autonomy_adapter::steps_as_links(&steps),
+        &[rb.clone(), ra.clone()]
+    )
+    .is_err());
     let mut forged = ra.clone();
     forged.outputs.push(ethical_autonomy_adapter::act::Output {
         path: "files/extra".to_string(),
         hash: [0; 32],
     });
-    assert!(check_receipts(&keys().device.public, &steps, &[forged, rb]).is_err());
+    assert!(check_receipts(
+        &keys().device.public,
+        &ethical_autonomy_adapter::steps_as_links(&steps),
+        &[forged, rb]
+    )
+    .is_err());
 }
 
 /// A stop between committing a step and carrying out its act leaves a step with no receipt.
@@ -335,7 +355,9 @@ fn an_act_interrupted_by_a_stop_is_carried_out_at_the_next_start() {
     let world = dir.join("world");
     let store = ChainStore::open(&dir.join("store")).expect("store");
     let mut e = acting_enforcer();
-    store.begin(&e.state(), e.device_public()).expect("begin");
+    store
+        .begin(&e.state(), e.device_public(), &acting_charter())
+        .expect("begin");
     let futures = e.fork(&[said("add_precautions", "please look at this")]);
     let step = e
         .commit_with(&futures[0], |s| store.append(s))
@@ -345,7 +367,7 @@ fn an_act_interrupted_by_a_stop_is_carried_out_at_the_next_start() {
 
     let stored = store.load().expect("load");
     assert_eq!(
-        check_receipts(&keys().device.public, &stored.steps, &stored.receipts).expect("ok"),
+        check_receipts(&keys().device.public, &stored.links, &stored.receipts).expect("ok"),
         1
     );
     let resumed = Enforcer::resume(
@@ -353,7 +375,7 @@ fn an_act_interrupted_by_a_stop_is_carried_out_at_the_next_start() {
         acting_charter(),
         &keys().authority.public,
         &stored.genesis,
-        &stored.steps,
+        &stored.links,
     )
     .expect("resume");
     Service::start(
@@ -361,14 +383,13 @@ fn an_act_interrupted_by_a_stop_is_carried_out_at_the_next_start() {
         ChainStore::open(&dir.join("store")).expect("store"),
         world.clone(),
         keys().authority.public.clone(),
-        &stored.steps,
-        stored.receipts.len(),
+        &ethical_autonomy_adapter::pending_steps(&stored.links, &stored.receipts),
     )
     .expect("start");
 
     let after = store.load().expect("load");
     assert_eq!(
-        check_receipts(&keys().device.public, &after.steps, &after.receipts).expect("ok"),
+        check_receipts(&keys().device.public, &after.links, &after.receipts).expect("ok"),
         0
     );
     assert_eq!(after.receipts[0].decision_commit, step.decision_commit);
@@ -499,14 +520,15 @@ fn a_failed_act_halts_commits_until_a_restart_finishes_it() {
     let world = dir.join("world");
     let store = ChainStore::open(&dir.join("store")).expect("store");
     let e = acting_enforcer();
-    store.begin(&e.state(), e.device_public()).expect("begin");
+    store
+        .begin(&e.state(), e.device_public(), &acting_charter())
+        .expect("begin");
     let mut service = Service::start(
         e,
         store,
         world.clone(),
         keys().authority.public.clone(),
         &[],
-        0,
     )
     .expect("start");
     // A file where the journal directory must go makes the journal act fail.
@@ -538,14 +560,14 @@ fn a_failed_act_halts_commits_until_a_restart_finishes_it() {
     std::fs::remove_file(world.join("journal")).expect("unblock");
     let reopened = ChainStore::open(&dir.join("store")).expect("store");
     let stored = reopened.load().expect("load");
-    assert_eq!(stored.steps.len(), 1);
+    assert_eq!(stored.links.len(), 1);
     assert_eq!(stored.receipts.len(), 0);
     let resumed = Enforcer::resume(
         keys().device.clone(),
         acting_charter(),
         &keys().authority.public,
         &stored.genesis,
-        &stored.steps,
+        &stored.links,
     )
     .expect("resume");
     let mut service = Service::start(
@@ -553,8 +575,7 @@ fn a_failed_act_halts_commits_until_a_restart_finishes_it() {
         reopened,
         world.clone(),
         keys().authority.public.clone(),
-        &stored.steps,
-        stored.receipts.len(),
+        &ethical_autonomy_adapter::pending_steps(&stored.links, &stored.receipts),
     )
     .expect("restart");
     assert_eq!(
@@ -578,7 +599,7 @@ fn a_failed_act_halts_commits_until_a_restart_finishes_it() {
         .load()
         .expect("load");
     assert_eq!(
-        check_receipts(&keys().device.public, &after.steps, &after.receipts).expect("ok"),
+        check_receipts(&keys().device.public, &after.links, &after.receipts).expect("ok"),
         0
     );
     assert_eq!(check_world(&world, &after.receipts).expect("clean"), 2);
@@ -606,7 +627,7 @@ fn a_receipt_must_list_exactly_what_its_act_writes() {
     assert_eq!(
         check_receipts(
             &keys().device.public,
-            std::slice::from_ref(&step),
+            &ethical_autonomy_adapter::steps_as_links(std::slice::from_ref(&step)),
             std::slice::from_ref(&good)
         )
         .expect("ok"),
@@ -629,7 +650,7 @@ fn a_receipt_must_list_exactly_what_its_act_writes() {
         assert!(
             check_receipts(
                 &keys().device.public,
-                std::slice::from_ref(&step),
+                &ethical_autonomy_adapter::steps_as_links(std::slice::from_ref(&step)),
                 &[signed]
             )
             .is_err(),
@@ -646,14 +667,15 @@ fn the_service_sweeps_temporary_files_when_it_starts() {
     std::fs::write(world.join("journal/.9.partial"), "half").expect("partial");
     let store = ChainStore::open(&dir.join("store")).expect("store");
     let e = acting_enforcer();
-    store.begin(&e.state(), e.device_public()).expect("begin");
+    store
+        .begin(&e.state(), e.device_public(), &acting_charter())
+        .expect("begin");
     Service::start(
         e,
         store,
         world.clone(),
         keys().authority.public.clone(),
         &[],
-        0,
     )
     .expect("start");
     assert!(!world.join("journal/.9.partial").exists());
@@ -667,9 +689,11 @@ fn a_failed_store_write_halts_commits() {
     let world = dir.join("world");
     let store = ChainStore::open(&dir.join("store")).expect("store");
     let e = acting_enforcer();
-    store.begin(&e.state(), e.device_public()).expect("begin");
+    store
+        .begin(&e.state(), e.device_public(), &acting_charter())
+        .expect("begin");
     let mut service =
-        Service::start(e, store, world, keys().authority.public.clone(), &[], 0).expect("start");
+        Service::start(e, store, world, keys().authority.public.clone(), &[]).expect("start");
     let chain = dir.join("store/chain.jsonl");
     std::fs::set_permissions(&chain, std::fs::Permissions::from_mode(0o400)).expect("read-only");
     let root = forked(service.handle(Request::Propose {
@@ -702,9 +726,11 @@ fn a_superseded_fork_is_stored_and_checked() {
     let store = ChainStore::open(&dir.join("store")).expect("store");
     let e = acting_enforcer();
     let genesis = e.state();
-    store.begin(&e.state(), e.device_public()).expect("begin");
+    store
+        .begin(&e.state(), e.device_public(), &acting_charter())
+        .expect("begin");
     let mut service =
-        Service::start(e, store, world, keys().authority.public.clone(), &[], 0).expect("start");
+        Service::start(e, store, world, keys().authority.public.clone(), &[]).expect("start");
     forked(service.handle(Request::Propose {
         proposals: vec![said("cause_harm", ""), said("overreach", "")],
     }));
@@ -736,9 +762,9 @@ fn a_superseded_fork_is_stored_and_checked() {
     let check = |c: &[(usize, ethical_autonomy_adapter::fork::ConsideredFork)]| {
         check_considered(
             &keys().device.public,
-            &acting_charter(),
+            &vec![acting_charter(); stored.links.len() + 1],
             &genesis,
-            &stored.steps,
+            &stored.links,
             c,
         )
     };
@@ -756,14 +782,15 @@ fn no_more_than_the_limit_can_be_put_forward_at_one_step() {
     let dir = place("limit");
     let store = ChainStore::open(&dir.join("store")).expect("store");
     let e = acting_enforcer();
-    store.begin(&e.state(), e.device_public()).expect("begin");
+    store
+        .begin(&e.state(), e.device_public(), &acting_charter())
+        .expect("begin");
     let mut service = Service::start(
         e,
         store,
         dir.join("world"),
         keys().authority.public.clone(),
         &[],
-        0,
     )
     .expect("start");
     let many: Vec<Proposal> = (0..=ethical_autonomy_adapter::MAX_FORK)

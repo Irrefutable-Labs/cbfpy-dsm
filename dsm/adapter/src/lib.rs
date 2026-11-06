@@ -13,7 +13,7 @@
 pub mod act;
 mod charter;
 pub mod commit;
-mod config;
+pub(crate) mod config;
 pub mod console;
 pub mod disclosure;
 mod enforcer;
@@ -25,14 +25,15 @@ pub mod protocol;
 pub mod report;
 pub mod server;
 pub mod store;
+pub mod update;
 mod verify;
 
 pub use charter::{keypair_from_seed, Catalog, CatalogRow, Keypair, SignedCharter};
-pub use config::parse_charter_config;
+pub use config::{charter_config_text, parse_charter_config};
 pub use enforcer::{
     audit_chain, check_considered, check_receipts, derive_transition_entropy, identity_of,
-    AdapterError, AttestedState, Audit, Decision, Enforcer, Future, FutureStatus, Proposal,
-    StepRecord, MAX_FORK,
+    pending_steps, steps_as_links, AdapterError, AttestedState, Audit, Decision, Enforcer, Future,
+    FutureStatus, Link, Proposal, StepRecord, MAX_FORK,
 };
 pub use verify::{verify_genesis, verify_step, Refusal};
 

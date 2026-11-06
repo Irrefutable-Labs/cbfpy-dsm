@@ -1,4 +1,4 @@
-# Technical report: DSM ethical autonomy prototype v0.6
+# Technical report: DSM ethical autonomy prototype v0.7
 
 **Date:** 2026-11-05. **Repository:** [Irrefutable-Labs/cbfpy-dsm](https://github.com/Irrefutable-Labs/cbfpy-dsm), a fork of CBFpy. **DSM:** `deterministicstatemachine/dsm` at `b6060a334`, a pinned git dependency. **DSM code changed:** none.
 
@@ -35,7 +35,7 @@ The audit verified every step from its parent alone and replayed it through DSM'
 | 7 | Unauthorized policy changes invalidate | Met | A moved center, widened band, bumped version, tampered catalog or stranger's signature are refused. The enforcer refuses a charter edited on disk |
 | 8 | Attributable to parent and policy | Met | Every step verifies from its one parent and carries its whole fork, and every act has a signed receipt tied to its step. An edited or dropped stored step stops the enforcer and fails the audit, and so does any file in the world no committed act wrote |
 | 9 | Entirely offline | Met on this machine | The recorded run had internet access denied by a macOS sandbox. Fetching dependencies needed the network once, beforehand |
-| 10 | Tests pass, results reproducible | Met, with limits | 188 Rust tests, on Linux and macOS, formatting, Clippy, the CBFpy cross-check and the Lean proofs, all run in CI. Live model output is not reproducible, so its recording is what replays |
+| 10 | Tests pass, results reproducible | Met, with limits | 199 Rust tests, on Linux and macOS, formatting, Clippy, the CBFpy cross-check and the Lean proofs, all run in CI. Live model output is not reproducible, so its recording is what replays |
 
 ## What supports each property
 
@@ -59,6 +59,7 @@ The audit verified every step from its parent alone and replayed it through DSM'
 - **Forgery with the real device key:** 17 tests. One is a control showing the forger makes a valid step when it tells no lies. The rest sign a false step and assert the exact refusal.
 - **The fork:** a refused candidate marked eligible, a fork missing the chosen step, an index pointing at a refused candidate, an empty fork, and an edited fork are each refused.
 - **Non-concealment:** every way a declaration can fail is tested on its own. These are: no declaration, no purpose or reasons, an unidentifiable source, an effect left out or falsely claimed, a party left out, and a material consequence left out. A concealing candidate cannot commit. A declaration cannot be changed or stripped after commit, even by a forger holding the device key. Material consequences are covered by the authority's signature. The scripted run refuses an answer that leaves out the person it affects, and a risk that leaves out its consequence.
+- **Foundations and updates:** an operational change signed by the authority is accepted, takes effect, moves no position, and the whole history, both charters included, audits and resumes. A change to the prohibitions or to any hard limit is refused, even with the authority's signature. So are a version that does not rise and a charter signed by anyone else. An update record that is swapped, edited or unsigned fails the audit. End to end, the enforcer refuses a different charter without `--apply-update`, refuses a foundation change with it, and applies an operational one. The audit then reports the move from version 1 to 2. The AI's socket gets no answer to a request to change the charter.
 - **The console:** its view of a scripted run agrees with the audit, shows the refused prohibited action with its reason, flags a file no receipt accounts for, and serves its page and state on localhost only.
 - **The service:** a killed enforcer resumes exactly where it stopped. An edited store stops it, and the audit agrees. A device seed others can read is refused, and the socket is owner-only. Over the raw protocol, a client cannot choose a refused candidate, reuse a closed fork, or attach a score.
 - **Key and world isolation:** on macOS, the agent completes a run while the operating system denies it any read of the seed or the store and any write to the world. The same sandbox shows the seed is really out of reach and the world cannot be written directly. The world is nonetheless written, by the enforcer alone, and the audit agrees with it.
@@ -94,7 +95,7 @@ The audit verified every step from its parent alone and replayed it through DSM'
 - **Routes around the enforcer.** In the recorded run and the macOS test, the operating system denied the agent the network and any write to the world, so its only way to act was through the enforcer. Separate-user mode makes this a standing boundary rather than a profile. A model given any other way to act is not constrained by this.
 - **The sandboxes themselves.** Command confinement relies on `sandbox-exec` and `bwrap` behaving as documented. Their own correctness is not examined here, and `sandbox-exec` is deprecated by Apple, though still shipped.
 - **Conflict across parties.** The enforcer refuses a second successor because its parent is no longer the tip. That is the only conflict exercised here. Nothing here tests or changes acceptance between peers, and A14 is untouched.
-- **Policy rotation.** There is no path. A chain lives under the policy it began with.
+- **Who signs updates.** The charter authority's key signs both the first charter and every update. Splitting those between two keys, or requiring more than one signature for an update, is not done here.
 - **Concurrency.** The enforcer serves one client at a time.
 
 ## Design decisions for the owner

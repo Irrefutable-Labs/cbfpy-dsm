@@ -1,18 +1,17 @@
 //! A live view of a chain, in your browser. It reads the store, the world, the charter and the
 //! public keys, and holds no key. Every verdict on the page is worked out again on each change.
 //!
-//! ethical-console --store DIR --world DIR --charter C --signature SIG --authority PUBLIC
-//!                 --device PUBLIC [--port 8770]
+//! ethical-console --store DIR --world DIR --authority PUBLIC --device PUBLIC [--port 8770]
+//!
+//! The store carries every charter that governed it.
 //!
 //! It listens on 127.0.0.1 only.
 
 use ethical_autonomy_adapter::console::build;
-use ethical_autonomy_adapter::hexser::decode;
 use ethical_autonomy_adapter::keys::read_public_key;
-use ethical_autonomy_adapter::{parse_charter_config, SignedCharter};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::SystemTime;
 
@@ -21,7 +20,6 @@ const PAGE: &str = include_str!("../console.html");
 struct View {
     store: PathBuf,
     world: PathBuf,
-    charter: SignedCharter,
     authority: Vec<u8>,
     device: Vec<u8>,
     /// The last page of state, and the store's size and time it was built from.
@@ -38,13 +36,7 @@ impl View {
                 return json.clone();
             }
         }
-        let console = build(
-            &self.store,
-            &self.world,
-            &self.charter,
-            &self.authority,
-            &self.device,
-        );
+        let console = build(&self.store, &self.world, &self.authority, &self.device);
         let json =
             serde_json::to_string(&console).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"));
         self.cached = Some((stamp, json.clone()));
@@ -77,35 +69,22 @@ fn serve(view: &mut View, mut stream: TcpStream) -> std::io::Result<()> {
 
 fn run() -> Result<(), String> {
     let mut a = std::env::args().skip(1);
-    let (mut store, mut world, mut charter, mut signature, mut authority, mut device) =
-        (None, None, None, None, None, None);
+    let (mut store, mut world, mut authority, mut device) = (None, None, None, None);
     let mut port = 8770u16;
     while let Some(flag) = a.next() {
         let value = a.next().ok_or(format!("{flag} needs a value"))?;
         match flag.as_str() {
             "--store" => store = Some(PathBuf::from(value)),
             "--world" => world = Some(PathBuf::from(value)),
-            "--charter" => charter = Some(PathBuf::from(value)),
-            "--signature" => signature = Some(PathBuf::from(value)),
             "--authority" => authority = Some(PathBuf::from(value)),
             "--device" => device = Some(PathBuf::from(value)),
             "--port" => port = value.parse().map_err(|_| "bad --port")?,
             other => return Err(format!("unknown flag {other}")),
         }
     }
-    let read = |p: &Path| std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()));
-    let charter_path = charter.ok_or("--charter is required")?;
-    let (policy, catalog) =
-        parse_charter_config(&read(&charter_path)?).map_err(|e| e.to_string())?;
-    let charter = SignedCharter {
-        policy,
-        catalog,
-        signature: decode(read(&signature.ok_or("--signature is required")?)?.trim())?,
-    };
     let mut view = View {
         store: store.ok_or("--store is required")?,
         world: world.ok_or("--world is required")?,
-        charter,
         authority: read_public_key(&authority.ok_or("--authority is required")?)
             .map_err(|e| e.to_string())?,
         device: read_public_key(&device.ok_or("--device is required")?)

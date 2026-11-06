@@ -24,6 +24,9 @@ const EVIDENCE: TaggedHashDomain<'static> =
 const RECEIPT: TaggedHashDomain<'static> = dsm::tagged_domain!(b"DSM/ethical-autonomy/receipt/v0");
 const WORLD_FILE: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/world-file/v0");
+const FOUNDATION: TaggedHashDomain<'static> =
+    dsm::tagged_domain!(b"DSM/ethical-autonomy/foundation/v0");
+const UPDATE: TaggedHashDomain<'static> = dsm::tagged_domain!(b"DSM/ethical-autonomy/update/v0");
 const CONSIDERED: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/considered/v0");
 const CANDIDATE: TaggedHashDomain<'static> =
@@ -232,4 +235,12 @@ pub fn fork_root(leaves: &[Hash]) -> Hash {
 /// A fork that was put forward and then superseded, before any step committed from its parent.
 pub fn considered_commit(parent_tip: &Hash, fork_root: &Hash) -> Hash {
     domain_hash_bytes(CONSIDERED, &frame(&[parent_tip, fork_root]))
+}
+
+pub fn foundation_commit(bytes: &[u8]) -> Hash {
+    domain_hash_bytes(FOUNDATION, bytes)
+}
+
+pub fn update_commit(bytes: &[u8]) -> Hash {
+    domain_hash_bytes(UPDATE, bytes)
 }

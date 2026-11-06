@@ -202,9 +202,12 @@ function renderChain() {
 
 function renderCharter() {
   const c = data.charter;
+  if (!c) { $("charter").innerHTML = `<dt>Charter</dt><dd class="empty">not readable</dd>`; $("rules").innerHTML = ""; return; }
   $("charter").innerHTML = `
-    <dt>Version</dt><dd>${c.version}</dd>
+    <dt>In force</dt><dd>version ${c.version}</dd>
+    <dt>History</dt><dd>${c.history.map(esc).join("<br>")}</dd>
     <dt>Policy</dt><dd class="mono" title="${esc(c.policy_hash)}">${short(c.policy_hash)}</dd>
+    <dt>Foundation</dt><dd><span class="mono" title="${esc(c.foundation)}">${short(c.foundation)}</span> <span class="meta">fixed at genesis: the prohibitions and every hard limit</span></dd>
     <dt>Prohibited</dt><dd>${c.prohibited.map(p => `<span class="chip warn">${esc(label(p))}</span>`).join("") || "none"}</dd>`;
   const st = data.states[+$("scrub").value];
   const fired = new Set(st ? st.fired_rules : []);
@@ -226,6 +229,7 @@ function renderBands() {
   $("bands-note").textContent = st.fired_rules.length
     ? `Coupling rules active here: ${st.fired_rules.join(", ")}. Shaded zones are the limits as coupling sets them at this state.`
     : "Shaded zones are each band's limits at this state. No coupling rule is active.";
+  if (!data.charter) { $("bands").innerHTML = `<p class="empty">No charter to show.</p>`; return; }
   $("bands").innerHTML = data.charter.bands.map((b, d) => {
     const e = st.effective[d], lo = -b.hard_neg, hi = b.hard_pos, p = st.positions[d] - b.center;
     const X = v => x(v, lo, hi).toFixed(1);
@@ -295,6 +299,11 @@ function renderSteps() {
       ${pend.map(f => f.map(c => candidate(c, false, "p", register(c, lastState))).join("")).join("")}</div></div></div>` : "";
   if (!data.steps.length) { $("steps").innerHTML = `<p class="empty">No step has been committed yet.</p>`; return; }
   $("steps").innerHTML = data.steps.slice().reverse().map(s => {
+    if (s.kind === "update") {
+      return `<div class="step"><div class="step-head" data-seq="${s.sequence}" style="cursor:default">
+        <div><div class="step-title">Step ${s.sequence} · charter updated to version ${s.charter_version}</div>
+        <div class="step-sub">An operational change, signed by the charter authority and applied by the operator. The foundation is unchanged; the AI has no way to make this change.</div></div></div></div>`;
+    }
     const chosen = s.fork[s.chosen] || {};
     const refused = s.fork.filter(c => c.outcome !== "eligible").length;
     const replaced = s.considered.reduce((n, f) => n + f.length, 0);

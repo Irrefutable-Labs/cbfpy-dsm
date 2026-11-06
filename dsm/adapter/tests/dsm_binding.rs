@@ -235,7 +235,7 @@ mod persistence {
             charter(),
             &keys().authority.public,
             &genesis,
-            &steps,
+            &ethical_autonomy_adapter::steps_as_links(&steps),
         )
         .expect("resume");
         assert_eq!(resumed.state(), live.state());
@@ -250,7 +250,7 @@ mod persistence {
             charter(),
             &keys().authority.public,
             &genesis,
-            &steps,
+            &ethical_autonomy_adapter::steps_as_links(&steps),
         )
         .expect("resume");
         assert_eq!(
@@ -269,7 +269,7 @@ mod persistence {
             charter(),
             &keys().authority.public,
             &genesis,
-            &steps,
+            &ethical_autonomy_adapter::steps_as_links(&steps),
         );
         assert!(matches!(result, Err(AdapterError::BadStore(_))));
     }
@@ -283,7 +283,7 @@ mod persistence {
             charter(),
             &keys().authority.public,
             &genesis,
-            &steps,
+            &ethical_autonomy_adapter::steps_as_links(&steps),
         )
         .is_err());
     }
@@ -317,7 +317,7 @@ mod persistence {
             &charter(),
             &keys().authority.public,
             &genesis,
-            &[step],
+            &ethical_autonomy_adapter::steps_as_links(&[step]),
         )
         .expect("audit");
         assert_eq!(audit.forks, vec![(3, 1, 1)]);

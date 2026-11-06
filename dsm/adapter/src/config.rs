@@ -244,3 +244,85 @@ pub fn parse_charter_config(text: &str) -> Result<(Policy, Catalog), AdapterErro
         Catalog { rows },
     ))
 }
+
+/// A charter written back as the JSON its authority writes, so a store can carry every charter
+/// that governed it. Reading it back gives the same policy and catalog.
+pub fn charter_config_text(policy: &Policy, catalog: &Catalog) -> String {
+    use serde_json::json;
+    let name = |d: usize| {
+        policy
+            .bands
+            .get(d)
+            .map_or("?", |b| b.name.as_str())
+            .to_string()
+    };
+    let bands: Vec<serde_json::Value> = policy
+        .bands
+        .iter()
+        .map(|b| {
+            let (kind, num, den) = match b.curve {
+                Curve::Linear { num, den } => ("linear", num, den),
+                Curve::Quadratic { num, den } => ("quadratic", num, den),
+            };
+            json!({
+                "name": b.name, "center": b.center, "limit_pos": b.limit_pos,
+                "limit_neg": b.limit_neg, "hard_pos": b.hard_pos, "hard_neg": b.hard_neg,
+                "no_outward_bp": b.no_outward_bp, "restore_bp": b.restore_bp,
+                "curve": {"kind": kind, "num": num, "den": den},
+                "max_step": b.max_step, "restore_progress": b.restore_progress,
+            })
+        })
+        .collect();
+    let rules: Vec<serde_json::Value> = policy
+        .rules
+        .iter()
+        .map(|r| {
+            let when: Vec<serde_json::Value> = r
+                .when
+                .iter()
+                .map(|c| {
+                    let (test, value) = match c.test {
+                        Test::DeviationAtLeast(x) => ("deviation_at_least", x),
+                        Test::DeviationAtMost(x) => ("deviation_at_most", x),
+                        Test::SignedAtLeast(x) => ("signed_at_least", x),
+                        Test::SignedAtMost(x) => ("signed_at_most", x),
+                    };
+                    json!({"dim": name(c.dim), "test": test, "value": value})
+                })
+                .collect();
+            let effect = match r.effect {
+                Effect::Adjust { target, side, delta } => json!({
+                    "kind": "adjust", "target": name(target), "delta": delta,
+                    "side": match side { Side::Positive => "positive", Side::Negative => "negative", Side::Both => "both" },
+                }),
+                Effect::ForceRestore { target, progress } => {
+                    json!({"kind": "force_restore", "target": name(target), "progress": progress})
+                }
+            };
+            json!({"id": r.id, "when": when, "effect": effect})
+        })
+        .collect();
+    let rows: Vec<serde_json::Value> = catalog
+        .rows
+        .iter()
+        .map(|r| {
+            let displacement: serde_json::Map<String, serde_json::Value> = r
+                .displacement
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| **v != 0)
+                .map(|(d, v)| (name(d), json!(v)))
+                .collect();
+            json!({
+                "action": r.action, "description": r.description, "displacement": displacement,
+                "tags": r.tags, "act": r.act, "material": r.material,
+            })
+        })
+        .collect();
+    json!({
+        "policy": {"version": policy.version, "prohibited_tags": policy.prohibited_tags,
+                   "bands": bands, "rules": rules},
+        "catalog": rows,
+    })
+    .to_string()
+}

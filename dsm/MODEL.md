@@ -135,3 +135,15 @@ A proposal carries a declaration of purpose, information, affected parties, effe
 - a material consequence is missing.
 
 The declaration is part of the proposal commitment, so it is bound into the branch commitment, the fork root and the decision, and the verifier works the check out again. What this does not establish is that the stated purpose is the AI's true one, or that an information source it names was really what it relied on.
+
+## Foundations and updates
+
+A charter's **foundation** is its prohibited tags and every band's name and hard limits. Its hash is computed from the policy alone. An **update** carries a whole new charter, signed by the authority, and is accepted only if:
+
+- its foundation hash equals the old one;
+- its version is higher;
+- the parent was under the old charter.
+
+The update is a DSM step like any other. Its commitment binds the parent tip, the parent state, the new policy and catalog hashes, the new version and a successor with **unchanged positions**. That commitment is carried in the same operation type, signed by the device, and its tip is recomputed from the parent with core's rule.
+
+The audit walks the links in order, and checks each step under the charter then in force. It checks each update from its parent under the old charter, then continues under the new one. Since the first charter's foundation is fixed at genesis and every update must keep it, no chain can ever be governed by a different foundation. An update can narrow or widen what the AI may do inside the hard limits, but not the hard limits or the prohibitions.

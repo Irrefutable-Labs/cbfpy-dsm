@@ -1,9 +1,11 @@
-//! The chain on disk: one JSON line per entry, the genesis first, each step written and synced
-//! before the enforcer installs it. Nothing read back is trusted: a store is audited in full and
+//! The chain on disk: one JSON line per entry, the genesis and its charter first, each step or
+//! charter update written and synced before the enforcer installs it. Nothing read back is trusted: a store is audited in full and
 //! replayed through core before an enforcer resumes from it.
 
 use crate::act::EffectReceipt;
-use crate::enforcer::{AdapterError, AttestedState, StepRecord};
+use crate::charter::SignedCharter;
+use crate::enforcer::{AdapterError, AttestedState, Link, StepRecord};
+use crate::update::UpdateRecord;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -12,18 +14,32 @@ use std::path::{Path, PathBuf};
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Entry {
-    Genesis(Box<AttestedState>),
+    Genesis(Box<GenesisEntry>),
     Step(Box<StepRecord>),
+    Update(Box<UpdateRecord>),
     Effect(Box<EffectReceipt>),
     Considered(Box<crate::fork::ConsideredFork>),
+}
+
+/// The first line: the genesis state, and the charter that governed it, in full.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GenesisEntry {
+    state: AttestedState,
+    charter_text: String,
+    #[serde(with = "crate::hexser::bytes")]
+    charter_signature: Vec<u8>,
 }
 
 /// A stored chain as read back, not yet trusted.
 pub struct Stored {
     pub genesis: AttestedState,
-    pub steps: Vec<StepRecord>,
+    /// The charter the chain began under. Every later charter is in an update link.
+    pub genesis_charter: SignedCharter,
+    /// Steps and charter updates, in order.
+    pub links: Vec<Link>,
     pub receipts: Vec<EffectReceipt>,
-    /// Forks put forward and superseded, each with the number of steps stored before it.
+    /// Forks put forward and superseded, each with the number of links stored before it.
     pub considered: Vec<(usize, crate::fork::ConsideredFork)>,
     /// A last line cut short by a stop mid-write. It was never installed: a step whose line
     /// is torn never committed, and a receipt whose line is torn leaves its act to be redone.
@@ -124,14 +140,24 @@ impl ChainStore {
 
     /// Start a new chain where none has begun. A genesis line cut short by a stop is replaced;
     /// the caller has checked [`ChainStore::exists`] under the store's lock.
-    pub fn begin(&self, genesis: &AttestedState, device_public: &[u8]) -> Result<(), AdapterError> {
+    pub fn begin(
+        &self,
+        genesis: &AttestedState,
+        device_public: &[u8],
+        charter: &SignedCharter,
+    ) -> Result<(), AdapterError> {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(self.chain())
             .map_err(io)?;
-        Self::write_line(&mut file, &Entry::Genesis(Box::new(genesis.clone())))?;
+        let entry = GenesisEntry {
+            state: genesis.clone(),
+            charter_text: crate::config::charter_config_text(&charter.policy, &charter.catalog),
+            charter_signature: charter.signature.clone(),
+        };
+        Self::write_line(&mut file, &Entry::Genesis(Box::new(entry)))?;
         std::fs::write(self.device(), crate::hexser::to_hex(device_public)).map_err(io)
     }
 
@@ -141,6 +167,14 @@ impl ChainStore {
             .open(self.chain())
             .map_err(io)?;
         Self::write_line(&mut file, &Entry::Step(Box::new(step.clone())))
+    }
+
+    pub fn append_update(&self, update: &UpdateRecord) -> Result<(), AdapterError> {
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(self.chain())
+            .map_err(io)?;
+        Self::write_line(&mut file, &Entry::Update(Box::new(update.clone())))
     }
 
     pub fn append_receipt(&self, receipt: &EffectReceipt) -> Result<(), AdapterError> {
@@ -175,24 +209,30 @@ impl ChainStore {
         let tail = lines.pop().unwrap_or("");
         let torn_tail = !tail.is_empty();
         let mut genesis = None;
-        let mut steps = Vec::new();
-        let mut receipts = Vec::new();
+        let mut links: Vec<Link> = Vec::new();
+        let mut receipts: Vec<EffectReceipt> = Vec::new();
         let mut considered = Vec::new();
         for (n, line) in lines.iter().enumerate() {
             let entry: Entry = serde_json::from_str(line)
                 .map_err(|e| AdapterError::BadStore(format!("line {}: {e}", n + 1)))?;
             match (entry, n) {
                 (Entry::Genesis(g), 0) => genesis = Some(*g),
-                (Entry::Step(s), n) if n > 0 => steps.push(*s),
+                (Entry::Step(s), n) if n > 0 => links.push(Link::Step(s)),
+                (Entry::Update(u), n) if n > 0 => links.push(Link::Update(u)),
                 // A receipt comes after its own step, and receipts come in order.
                 (Entry::Effect(r), n)
                     if n > 0
-                        && r.sequence as usize == receipts.len() + 1
-                        && r.sequence as usize <= steps.len() =>
+                        && receipts
+                            .last()
+                            .is_none_or(|last| r.sequence > last.sequence)
+                        && links.iter().any(|l| {
+                            l.as_step()
+                                .is_some_and(|s| s.successor.sequence == r.sequence)
+                        }) =>
                 {
                     receipts.push(*r)
                 }
-                (Entry::Considered(c), n) if n > 0 => considered.push((steps.len(), *c)),
+                (Entry::Considered(c), n) if n > 0 => considered.push((links.len(), *c)),
                 _ => {
                     return Err(AdapterError::BadStore(format!(
                         "line {}: out of place",
@@ -201,10 +241,15 @@ impl ChainStore {
                 }
             }
         }
-        let genesis = genesis.ok_or(AdapterError::BadStore("the store is empty".to_string()))?;
+        let g = genesis.ok_or(AdapterError::BadStore("the store is empty".to_string()))?;
+        let genesis_charter = crate::update::read_charter(&g.charter_text, &g.charter_signature)
+            .ok_or_else(|| {
+                AdapterError::BadStore("the genesis charter cannot be read".to_string())
+            })?;
         Ok(Stored {
-            genesis,
-            steps,
+            genesis: g.state,
+            genesis_charter,
+            links,
             receipts,
             considered,
             torn_tail,

@@ -37,8 +37,7 @@ impl Service {
         store: ChainStore,
         world: PathBuf,
         trusted_authority: Vec<u8>,
-        steps: &[StepRecord],
-        receipts: usize,
+        pending: &[StepRecord],
     ) -> Result<Self, AdapterError> {
         std::fs::create_dir_all(&world).map_err(|e| AdapterError::Effect(e.to_string()))?;
         std::fs::set_permissions(&world, std::os::unix::fs::PermissionsExt::from_mode(0o700))
@@ -56,7 +55,7 @@ impl Service {
             halted: None,
             agent_uid: None,
         };
-        for step in &steps[receipts..] {
+        for step in pending {
             let receipt = service.act(step)?;
             eprintln!(
                 "carried out the act of step {} after the restart",

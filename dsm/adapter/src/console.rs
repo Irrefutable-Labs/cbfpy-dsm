@@ -19,7 +19,8 @@ const PREVIEW: usize = 600;
 #[derive(Serialize)]
 pub struct Console {
     pub audit: AuditView,
-    pub charter: CharterView,
+    /// The charter in force now, and when each charter took over.
+    pub charter: Option<CharterView>,
     pub head: Option<HeadView>,
     /// The genesis state, then each committed step's successor.
     pub states: Vec<StateView>,
@@ -50,6 +51,9 @@ pub struct CharterView {
     pub bands: Vec<BandView>,
     pub rules: Vec<String>,
     pub prohibited: Vec<String>,
+    /// The hash of what no update may change: the prohibited acts and every hard limit.
+    pub foundation: String,
+    pub history: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -103,6 +107,10 @@ pub struct CandidateView {
 #[derive(Serialize)]
 pub struct StepView {
     pub sequence: u64,
+    /// `step` for an action, `update` for a change of operational charter.
+    pub kind: String,
+    /// The charter version this step was taken under, or an update installed.
+    pub charter_version: u64,
     pub chosen: usize,
     pub fork: Vec<CandidateView>,
     /// Forks the AI put forward at this step's parent and replaced before choosing.
@@ -313,17 +321,9 @@ fn world_files(world: &Path) -> Vec<(String, Vec<u8>)> {
     out
 }
 
-/// Build the console's view. A store that cannot be read gives a view with only the audit's
-/// account of why.
-pub fn build(
-    store_dir: &Path,
-    world: &Path,
-    charter: &SignedCharter,
-    trusted_authority: &[u8],
-    device_public: &[u8],
-) -> Console {
+fn charter_view(charter: &SignedCharter, history: Vec<String>) -> CharterView {
     let policy = &charter.policy;
-    let charter_view = CharterView {
+    CharterView {
         policy_hash: to_hex(&charter.policy_hash()),
         version: policy.version,
         bands: policy
@@ -344,7 +344,19 @@ pub fn build(
             .map(|r| describe_rule(policy, r))
             .collect(),
         prohibited: policy.prohibited_tags.clone(),
-    };
+        foundation: to_hex(&crate::update::foundation_hash(policy)),
+        history,
+    }
+}
+
+/// Build the console's view from the store alone, with the trusted keys. A store that cannot be
+/// read gives a view with only the audit's account of why.
+pub fn build(
+    store_dir: &Path,
+    world: &Path,
+    trusted_authority: &[u8],
+    device_public: &[u8],
+) -> Console {
     let stored = match ChainStore::open_read_only(store_dir).and_then(|s| s.load()) {
         Ok(s) => s,
         Err(e) => {
@@ -357,7 +369,7 @@ pub fn build(
                         detail: e.to_string(),
                     }],
                 },
-                charter: charter_view,
+                charter: None,
                 head: None,
                 states: vec![],
                 steps: vec![],
@@ -367,26 +379,53 @@ pub fn build(
             }
         }
     };
+    let links = &stored.links;
 
-    let mut checks = vec![check("charter", charter.verify(trusted_authority), |()| {
-        "signed by the trusted authority".to_string()
-    })];
+    // The charter governing each state, read as the store gives it. The audit checks each.
+    let mut charters = vec![stored.genesis_charter.clone()];
+    for link in links {
+        let next = match link {
+            crate::enforcer::Link::Update(u) => {
+                crate::update::read_charter(&u.charter_text, &u.charter_signature)
+                    .unwrap_or_else(|| charters[charters.len() - 1].clone())
+            }
+            crate::enforcer::Link::Step(_) => charters[charters.len() - 1].clone(),
+        };
+        charters.push(next);
+    }
+
+    let mut checks = vec![check(
+        "charter",
+        stored.genesis_charter.verify(trusted_authority),
+        |()| "the genesis charter is signed by the trusted authority".to_string(),
+    )];
     let audit = audit_chain(
         device_public,
-        charter,
+        &stored.genesis_charter,
         trusted_authority,
         &stored.genesis,
-        &stored.steps,
+        links,
     );
     let head = audit.as_ref().ok().map(|a| HeadView {
         sequence: a.last.sequence,
         tip: to_hex(&a.last.tip),
         dsm_root: to_hex(&a.dsm_root),
     });
+    let updates = links
+        .iter()
+        .filter(|l| matches!(l, crate::enforcer::Link::Update(_)))
+        .count();
     checks.push(check("chain", audit.map(|a| a.forks.len()), |n| {
-        format!("{n} steps verified from their parents and replayed through DSM")
+        if updates == 0 {
+            format!("{n} steps verified from their parents and replayed through DSM")
+        } else {
+            format!(
+                "{n} steps and {updates} charter {} verified from their parents and replayed through DSM, every update keeping the foundation",
+                if updates == 1 { "update" } else { "updates" }
+            )
+        }
     }));
-    let pending = check_receipts(device_public, &stored.steps, &stored.receipts);
+    let pending = check_receipts(device_public, links, &stored.receipts);
     let outstanding = *pending.as_ref().unwrap_or(&0);
     checks.push(check("receipts", pending, |p| {
         if p == 0 {
@@ -399,9 +438,9 @@ pub fn build(
         "considered forks",
         check_considered(
             device_public,
-            charter,
+            &charters,
             &stored.genesis,
-            &stored.steps,
+            links,
             &stored.considered,
         ),
         |(c, r)| format!("{c} superseded candidates checked from their parents, {r} refused"),
@@ -417,9 +456,10 @@ pub fn build(
         });
     }
 
-    let mut states = vec![state_view(policy, &stored.genesis)];
+    let mut states = vec![state_view(&charters[0].policy, &stored.genesis)];
     let mut steps = Vec::new();
     let mut parent = stored.genesis.clone();
+    let mut history = vec![format!("version {} at genesis", charters[0].policy.version)];
     let considered_at = |k: usize, parent: &AttestedState| -> Vec<Vec<CandidateView>> {
         stored
             .considered
@@ -428,41 +468,70 @@ pub fn build(
             .map(|(_, f)| {
                 f.records
                     .iter()
-                    .map(|r| candidate_view(charter, parent, r))
+                    .map(|r| candidate_view(&charters[k], parent, r))
                     .collect()
             })
             .collect()
     };
-    for (k, step) in stored.steps.iter().enumerate() {
-        let receipt = stored.receipts.get(k);
-        let outputs = receipt.map_or(vec![], |r| {
-            r.outputs
-                .iter()
-                .map(|o| OutputView {
-                    path: o.path.clone(),
-                    matches_world: std::fs::read(world.join(&o.path))
-                        .is_ok_and(|b| file_hash(&b) == o.hash),
-                })
-                .collect()
-        });
-        steps.push(StepView {
-            sequence: step.successor.sequence,
-            chosen: step.chosen as usize,
-            fork: step
-                .fork
-                .iter()
-                .map(|r| candidate_view(charter, &parent, r))
-                .collect(),
-            considered: considered_at(k, &parent),
-            tip: to_hex(&step.successor.tip),
-            decision: to_hex(&step.decision_commit),
-            outputs,
-            acted: receipt.is_some(),
-        });
-        states.push(state_view(policy, &step.successor));
-        parent = step.successor.clone();
+    for (k, link) in links.iter().enumerate() {
+        let charter = &charters[k];
+        match link {
+            crate::enforcer::Link::Step(step) => {
+                let receipt = stored
+                    .receipts
+                    .iter()
+                    .find(|r| r.sequence == step.successor.sequence);
+                let outputs = receipt.map_or(vec![], |r| {
+                    r.outputs
+                        .iter()
+                        .map(|o| OutputView {
+                            path: o.path.clone(),
+                            matches_world: std::fs::read(world.join(&o.path))
+                                .is_ok_and(|b| file_hash(&b) == o.hash),
+                        })
+                        .collect()
+                });
+                steps.push(StepView {
+                    sequence: step.successor.sequence,
+                    kind: "step".to_string(),
+                    charter_version: charter.policy.version,
+                    chosen: step.chosen as usize,
+                    fork: step
+                        .fork
+                        .iter()
+                        .map(|r| candidate_view(charter, &parent, r))
+                        .collect(),
+                    considered: considered_at(k, &parent),
+                    tip: to_hex(&step.successor.tip),
+                    decision: to_hex(&step.decision_commit),
+                    outputs,
+                    acted: receipt.is_some(),
+                });
+            }
+            crate::enforcer::Link::Update(update) => {
+                let new = &charters[k + 1];
+                history.push(format!(
+                    "version {} from step {}",
+                    new.policy.version, update.successor.sequence
+                ));
+                steps.push(StepView {
+                    sequence: update.successor.sequence,
+                    kind: "update".to_string(),
+                    charter_version: new.policy.version,
+                    chosen: 0,
+                    fork: vec![],
+                    considered: considered_at(k, &parent),
+                    tip: to_hex(&update.successor.tip),
+                    decision: to_hex(&update.update_commit),
+                    outputs: vec![],
+                    acted: true,
+                });
+            }
+        }
+        states.push(state_view(&charters[k + 1].policy, link.successor()));
+        parent = link.successor().clone();
     }
-    let pending_considered = considered_at(stored.steps.len(), &parent);
+    let pending_considered = considered_at(links.len(), &parent);
 
     let accounted: std::collections::BTreeMap<String, crate::Hash> = stored
         .receipts
@@ -484,7 +553,7 @@ pub fn build(
             ok: checks.iter().all(|c| c.ok),
             checks,
         },
-        charter: charter_view,
+        charter: Some(charter_view(&charters[charters.len() - 1], history)),
         head,
         states,
         steps,

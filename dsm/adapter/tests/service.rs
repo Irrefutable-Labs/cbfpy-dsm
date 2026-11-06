@@ -102,10 +102,6 @@ impl Place {
             .args([
                 "--store",
                 self.store().to_str().expect("path"),
-                "--charter",
-                "scenarios/charter.json",
-                "--signature",
-                "scenarios/charter.sig",
                 "--authority",
                 "scenarios/authority.pub",
                 "--device",
@@ -744,17 +740,6 @@ fn the_store_and_the_world_are_owner_only() {
     }
 }
 
-fn charter_for_console() -> ethical_autonomy_adapter::SignedCharter {
-    let text = std::fs::read_to_string(root().join("scenarios/charter.json")).expect("charter");
-    let (policy, catalog) = ethical_autonomy_adapter::parse_charter_config(&text).expect("parse");
-    let sig = std::fs::read_to_string(root().join("scenarios/charter.sig")).expect("sig");
-    ethical_autonomy_adapter::SignedCharter {
-        policy,
-        catalog,
-        signature: ethical_autonomy_adapter::hexser::decode(sig.trim()).expect("hex"),
-    }
-}
-
 fn console_keys(place: &Place) -> (Vec<u8>, Vec<u8>) {
     let read = |p: PathBuf| ethical_autonomy_adapter::keys::read_public_key(&p).expect("key");
     (
@@ -774,7 +759,6 @@ fn the_console_shows_what_happened_and_agrees_with_the_audit() {
     let view = ethical_autonomy_adapter::console::build(
         &place.store(),
         &place.world(),
-        &charter_for_console(),
         &authority,
         &device,
     );
@@ -812,6 +796,8 @@ fn the_console_shows_what_happened_and_agrees_with_the_audit() {
     );
     assert!(view
         .charter
+        .as_ref()
+        .expect("charter")
         .rules
         .iter()
         .any(|r| r.starts_with("Rule 2: when risk reward")));
@@ -828,7 +814,6 @@ fn the_console_flags_a_world_that_does_not_match() {
     let view = ethical_autonomy_adapter::console::build(
         &place.store(),
         &place.world(),
-        &charter_for_console(),
         &authority,
         &device,
     );
@@ -853,10 +838,6 @@ fn the_console_serves_its_page_and_state_on_localhost() {
             place.store().to_str().unwrap(),
             "--world",
             place.world().to_str().unwrap(),
-            "--charter",
-            "scenarios/charter.json",
-            "--signature",
-            "scenarios/charter.sig",
             "--authority",
             "scenarios/authority.pub",
             "--device",
@@ -897,4 +878,173 @@ fn the_console_serves_its_page_and_state_on_localhost() {
     assert!(get("/nothing").starts_with("HTTP/1.1 404"));
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// The operator moves a running chain to a new charter. The AI never can.
+#[test]
+fn the_operator_applies_an_update_and_the_foundation_holds() {
+    let place = Place::new("update");
+    let sign = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_ethical-sign-charter"))
+            .current_dir(root())
+            .args(args)
+            .output()
+            .expect("sign");
+        assert!(out.status.success(), "{}", text(&out));
+    };
+    let key = place.dir.join("authority.seed");
+    let public = place.dir.join("authority.pub");
+    sign(&[
+        "keygen",
+        "--key",
+        key.to_str().unwrap(),
+        "--public",
+        public.to_str().unwrap(),
+    ]);
+    let v1 = place.dir.join("v1.json");
+    let original = std::fs::read_to_string(root().join("scenarios/charter.json")).expect("read");
+    std::fs::write(&v1, &original).expect("write");
+    let write_signed = |name: &str, text: &str| -> (PathBuf, PathBuf) {
+        let path = place.dir.join(format!("{name}.json"));
+        let sig = place.dir.join(format!("{name}.sig"));
+        std::fs::write(&path, text).expect("write");
+        sign(&[
+            "sign",
+            "--key",
+            key.to_str().unwrap(),
+            "--charter",
+            path.to_str().unwrap(),
+            "--out",
+            sig.to_str().unwrap(),
+        ]);
+        (path, sig)
+    };
+    let (v1, v1_sig) = write_signed("v1", &original);
+    let start = |charter: &Path, sig: &Path, extra: &[&str]| {
+        let mut c = place.enforcer(charter);
+        c.args([
+            "--signature",
+            sig.to_str().unwrap(),
+            "--authority",
+            public.to_str().unwrap(),
+        ])
+        .args(extra);
+        c
+    };
+
+    // Begin under version 1 and take one step.
+    let _ = std::fs::remove_file(place.socket());
+    let child = start(&v1, &v1_sig, &[])
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start");
+    let first = Running(child);
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !place.socket().exists() {
+        assert!(Instant::now() < deadline, "the enforcer did not start");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let one = std::fs::read_to_string(root().join("scenarios/situations.json")).expect("read");
+    let only_first: serde_json::Value = serde_json::from_str(&one).expect("json");
+    let situations = place.dir.join("one.json");
+    std::fs::write(
+        &situations,
+        serde_json::to_string(&[&only_first[0]]).unwrap(),
+    )
+    .expect("write");
+    let out = place.agent(&["--situations", situations.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", text(&out));
+    drop(first);
+
+    // Version 2 widens curiosity: operational, so it may be applied.
+    let v2_text = original
+        .replacen("\"version\": 1", "\"version\": 2", 1)
+        .replacen(
+            "{\"name\": \"curiosity\", \"center\": 0, \"limit_pos\": 1000",
+            "{\"name\": \"curiosity\", \"center\": 0, \"limit_pos\": 1200",
+            1,
+        );
+    assert_ne!(v2_text, original);
+    let (v2, v2_sig) = write_signed("v2", &v2_text);
+    let refused = start(&v2, &v2_sig, &[]).output().expect("run");
+    assert!(!refused.status.success());
+    assert!(
+        text(&refused).contains("--apply-update"),
+        "{}",
+        text(&refused)
+    );
+
+    // Removing a prohibition is a foundation change: refused even with the authority's signature.
+    let v3_text = v2_text
+        .replacen("\"version\": 2", "\"version\": 3", 1)
+        .replacen(
+            "\"prohibited_tags\": [\"irreversible_harm\", \"deception\", \"coercion\"]",
+            "\"prohibited_tags\": [\"deception\", \"coercion\"]",
+            1,
+        );
+    assert_ne!(v3_text, v2_text);
+    let (v3, v3_sig) = write_signed("v3", &v3_text);
+    let foundation = start(&v3, &v3_sig, &["--apply-update"])
+        .output()
+        .expect("run");
+    assert!(!foundation.status.success());
+    assert!(
+        text(&foundation).contains("FoundationChanged"),
+        "{}",
+        text(&foundation)
+    );
+
+    let _ = std::fs::remove_file(place.socket());
+    let child = start(&v2, &v2_sig, &["--apply-update"])
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start");
+    let second = Running(child);
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !place.socket().exists() {
+        assert!(Instant::now() < deadline, "the enforcer did not start");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    drop(second);
+
+    let audit = Command::new(env!("CARGO_BIN_EXE_ethical-audit"))
+        .current_dir(root())
+        .args([
+            "--store",
+            place.store().to_str().unwrap(),
+            "--authority",
+            public.to_str().unwrap(),
+            "--device",
+            place.dir.join("device.pub").to_str().unwrap(),
+            "--world",
+            place.world().to_str().unwrap(),
+        ])
+        .output()
+        .expect("audit");
+    let report = text(&audit);
+    assert!(audit.status.success(), "{report}");
+    assert!(
+        report.contains("charter moved from version 1 to 2, keeping the foundation"),
+        "{report}"
+    );
+    assert!(report.contains("charter in force: version 2"), "{report}");
+}
+
+#[test]
+fn the_ai_has_no_request_that_changes_the_charter() {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::net::UnixStream;
+    let place = Place::new("no-update");
+    let _e = place.start();
+    let stream = UnixStream::connect(place.socket()).expect("connect");
+    let mut w = stream.try_clone().expect("clone");
+    let mut r = BufReader::new(stream);
+    w.write_all(b"{\"request\":\"update\",\"charter\":\"anything\"}\n")
+        .expect("write");
+    let mut answer = String::new();
+    r.read_line(&mut answer).expect("read");
+    assert!(
+        answer.is_empty(),
+        "the enforcer must not answer, let alone act: {answer}"
+    );
 }
