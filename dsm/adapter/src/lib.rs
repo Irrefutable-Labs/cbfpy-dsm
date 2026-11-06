@@ -1,24 +1,37 @@
 //! A separate experimental layer over DSM's public API. It changes nothing in DSM.
 //!
 //! The AI proposes actions. It never supplies a number: each action's measurement comes from a
-//! catalog the policy authority signed. Candidate futures branch from the authenticated parent,
-//! the engine decides which are eligible, and the one committed becomes a real step on a real
-//! `dsm::core::state_machine::StateMachine`. A step verifies from its one parent and reads
-//! nothing behind it, as Amendment A14 has it for acceptance; this policy layer adds a check
-//! beside acceptance and leaves acceptance itself alone.
+//! catalog the policy authority signed. Every candidate branches from the authenticated parent
+//! and the whole fork is committed. The engine decides which are eligible, and the one chosen
+//! becomes a real step on a real `dsm::core::state_machine::StateMachine`. A step verifies from
+//! its one parent and reads nothing behind it, as Amendment A14 has it for acceptance; this
+//! policy layer adds a check beside acceptance and leaves acceptance itself alone.
+//!
+//! The enforcer runs as its own service (`server`), holding the keys and the chain. The AI's side
+//! reaches it only through `protocol`.
 
 mod charter;
 pub mod commit;
 mod config;
 mod enforcer;
+pub mod fork;
+pub mod hexser;
+pub mod protocol;
+pub mod report;
+pub mod server;
+pub mod store;
 mod verify;
 
 pub use charter::{keypair_from_seed, Catalog, CatalogRow, Keypair, SignedCharter};
 pub use config::parse_charter_config;
 pub use enforcer::{
-    derive_transition_entropy, identity_of, AdapterError, AttestedState, Decision, Enforcer, Future,
-    FutureStatus, Proposal, StepRecord,
+    audit_chain, derive_transition_entropy, identity_of, AdapterError, AttestedState, Audit,
+    Decision, Enforcer, Future, FutureStatus, Proposal, StepRecord, MAX_FORK,
 };
-pub use verify::{verify_step, Refusal};
+pub use verify::{verify_genesis, verify_step, Refusal};
 
 pub type Hash = [u8; 32];
+
+/// The policy authority the shipped binaries trust. Only `ethical-sign-charter` signs for it.
+pub const TRUSTED_AUTHORITY_PUBLIC: &str =
+    "78f64c05dd973238409cc049902c7080e61617f9affd072e5163942e570d126ffe795631e2ffe8ed4bd0d0bc139cae70f94c3e7af2f789923b7d88321a943733";

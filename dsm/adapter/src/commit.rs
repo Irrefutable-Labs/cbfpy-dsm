@@ -21,6 +21,9 @@ const EVALUATION: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/evaluation/v0");
 const EVIDENCE: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/evidence/v0");
+const CANDIDATE: TaggedHashDomain<'static> =
+    dsm::tagged_domain!(b"DSM/ethical-autonomy/candidate/v0");
+const FORK: TaggedHashDomain<'static> = dsm::tagged_domain!(b"DSM/ethical-autonomy/fork/v0");
 const DECISION: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/decision/v0");
 
@@ -83,7 +86,12 @@ pub fn state_commit(s: &StateFields<'_>) -> Hash {
 pub fn successor_commit(sequence: u64, positions: &[i64], policy: &Hash, catalog: &Hash) -> Hash {
     domain_hash_bytes(
         SUCCESSOR,
-        &frame(&[&sequence.to_be_bytes(), &integers(positions), policy, catalog]),
+        &frame(&[
+            &sequence.to_be_bytes(),
+            &integers(positions),
+            policy,
+            catalog,
+        ]),
     )
 }
 
@@ -122,6 +130,10 @@ pub fn evidence_commit(catalog: &Hash, row: &CatalogRow) -> Hash {
 
 pub struct DecisionFields<'a> {
     pub parent_tip: &'a Hash,
+    /// The root over every candidate the AI put forward at this parent, refused ones included.
+    pub fork_root: &'a Hash,
+    pub fork_size: u64,
+    pub chosen: u64,
     pub parent_state: &'a Hash,
     pub successor: &'a Hash,
     pub policy: &'a Hash,
@@ -136,6 +148,9 @@ pub fn decision_commit(d: &DecisionFields<'_>) -> Hash {
         DECISION,
         &frame(&[
             d.parent_tip,
+            d.fork_root,
+            &d.fork_size.to_be_bytes(),
+            &d.chosen.to_be_bytes(),
             d.parent_state,
             d.successor,
             d.policy,
@@ -166,4 +181,18 @@ pub fn decision_operation(
         signature: signature.to_vec(),
         mode: TransactionMode::Unilateral,
     }
+}
+
+/// One candidate as a leaf of its fork.
+pub fn candidate_leaf(canonical: &[u8]) -> Hash {
+    domain_hash_bytes(CANDIDATE, canonical)
+}
+
+/// The fork root: DSM's Merkle root over the candidates' leaves, with the count bound beside it.
+/// DSM's tree pads an odd level by repeating its last node, so without the count a fork and the
+/// same fork with its last candidate repeated would share a root.
+pub fn fork_root(leaves: &[Hash]) -> Hash {
+    let tree = dsm::merkle::tree::MerkleTree::new(leaves.iter().map(|l| l.to_vec()).collect());
+    let root = tree.root_hash().unwrap_or([0; 32]);
+    domain_hash_bytes(FORK, &frame(&[&(leaves.len() as u64).to_be_bytes(), &root]))
 }

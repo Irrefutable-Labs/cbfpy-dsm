@@ -2,15 +2,14 @@
 //! `StateMachine` head inside the enforcer. Nothing here stands in for production behavior.
 #![allow(dead_code)]
 
+use dsm::types::device_state::relationship_chain_tip_v2;
 use ethical_autonomy_adapter::commit;
+use ethical_autonomy_adapter::fork::{fork_root, record_candidate, CandidateRecord};
 use ethical_autonomy_adapter::{
     derive_transition_entropy, identity_of, keypair_from_seed, AttestedState, Catalog, CatalogRow,
     Enforcer, Hash, Keypair, Proposal, SignedCharter, StepRecord,
 };
-use dsm::types::device_state::relationship_chain_tip_v2;
-use ethical_band_engine::{
-    evaluate, Band, Cond, CouplingRule, Curve, Effect, Policy, Side, Test,
-};
+use ethical_band_engine::{evaluate, Band, Cond, CouplingRule, Curve, Effect, Policy, Side, Test};
 use std::sync::OnceLock;
 
 pub const DIMS: [&str; 6] = [
@@ -156,6 +155,9 @@ pub struct Lies {
     pub successor_sequence: Option<u64>,
     pub successor_policy: Option<Hash>,
     pub successor_catalog: Option<Hash>,
+    /// Replace the fork the step records. The decision commits to whatever is here.
+    pub fork: Option<Vec<CandidateRecord>>,
+    pub chosen: Option<u64>,
 }
 
 pub fn no_lies() -> Lies {
@@ -171,6 +173,8 @@ pub fn no_lies() -> Lies {
         successor_sequence: None,
         successor_policy: None,
         successor_catalog: None,
+        fork: None,
+        chosen: None,
     }
 }
 
@@ -191,14 +195,23 @@ pub fn forge(parent: &AttestedState, action: &str, lies: Lies) -> StepRecord {
         )
     });
     let evaluation = evaluate(&charter.policy, &parent.positions, &row.measurement());
-    let positions = lies.positions.unwrap_or_else(|| evaluation.successor.clone());
+    let positions = lies
+        .positions
+        .unwrap_or_else(|| evaluation.successor.clone());
     let evaluation_commit = lies
         .evaluation_commit
         .unwrap_or_else(|| commit::evaluation_commit(&evaluation.canonical_bytes()));
+    let (honest, _) = record_candidate(&charter, &parent.tip, &parent.positions, &proposal);
+    let fork = lies.fork.unwrap_or_else(|| vec![honest]);
+    let chosen = lies.chosen.unwrap_or(0);
+    let root = fork_root(&fork);
     let sequence = parent.sequence + 1;
     let successor = commit::successor_commit(sequence, &positions, &policy, &catalog);
     let decision_commit = commit::decision_commit(&commit::DecisionFields {
         parent_tip: &parent.tip,
+        fork_root: &root,
+        fork_size: fork.len() as u64,
+        chosen,
         parent_state: &parent.commitment(),
         successor: &successor,
         policy: &policy,
@@ -248,8 +261,15 @@ pub fn forge(parent: &AttestedState, action: &str, lies: Lies) -> StepRecord {
         row,
         branch_commitment: branch,
         evaluation_commit,
+        fork,
+        chosen,
         decision_commit,
         decision_signature,
         successor: next,
     }
+}
+
+/// The honest record of a candidate at a parent, as the enforcer would make it.
+pub fn record(parent: &AttestedState, action: &str) -> CandidateRecord {
+    record_candidate(&charter(), &parent.tip, &parent.positions, &propose(action)).0
 }

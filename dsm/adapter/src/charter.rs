@@ -30,7 +30,8 @@ pub fn keypair_from_seed(seed: &[u8; 32]) -> Result<Keypair, AdapterError> {
 }
 
 /// The independently supplied measurement of one action.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CatalogRow {
     pub action: String,
     pub description: String,
@@ -100,7 +101,11 @@ pub struct SignedCharter {
 }
 
 impl SignedCharter {
-    pub fn sign(policy: Policy, catalog: Catalog, authority: &Keypair) -> Result<Self, AdapterError> {
+    pub fn sign(
+        policy: Policy,
+        catalog: Catalog,
+        authority: &Keypair,
+    ) -> Result<Self, AdapterError> {
         policy.validate().map_err(|_| AdapterError::BadCharter)?;
         if !catalog.validate(policy.bands.len()) {
             return Err(AdapterError::BadCharter);

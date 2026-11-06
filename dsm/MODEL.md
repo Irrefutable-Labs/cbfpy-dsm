@@ -85,7 +85,8 @@ The engine's rule for crossing the center is deliberately stricter than the cont
 | Evaluation commitment | The engine's complete result for that candidate |
 | Evidence commitment | The catalog hash and the row used |
 | Successor commitment | Sequence, positions, policy hash, catalog hash |
-| Decision commitment | Parent tip, parent state, successor, policy hash and version, branch, evaluation, evidence |
+| Fork root | Every candidate at the parent, with its row, branch, outcome and evaluation, and their count |
+| Decision commitment | Parent tip, fork root, fork size, chosen index, parent state, successor, policy hash and version, branch, evaluation, evidence |
 | DSM step | The decision, carried in an operation, moved through `prepare_advance_relationship` and `commit_advance` |
 | Attested state | Sequence, new tip, positions, policy, catalog and the entropy core's next transition reads, under the device key |
 
@@ -97,4 +98,16 @@ Core refuses `Operation::Generic` as a zero-effect step (MR-DSM-0201), so a deci
 
 ### Pre-commit forking
 
-`dsm/src/commitments/precommit.rs` states that DSM's fork-aware precommit family, with several candidates under one committed root, is not built. This prototype builds its forking here in the policy layer. Each candidate gets its own branch commitment and nothing commits a set of candidates to one root. Tripwire's rule that only one branch of a parent can be realized is relied on only as far as this enforcer's own head: it refuses any future whose parent is no longer the tip.
+`dsm/src/commitments/precommit.rs` states that DSM's fork-aware precommit family, with several candidates under one committed root, is not built. This layer builds it for decisions.
+
+Every candidate proposed at a parent is recorded with its catalog row, its branch commitment from DSM's function, its outcome (eligible, refused or unmeasured) and its evaluation commitment. The **fork root** is DSM's Merkle root over those records, with the count bound beside it, because DSM's tree pads an odd level by repeating its last node. The decision commits to the fork root, its size and the chosen index, and the step carries every record.
+
+A verifier works out every record again from the parent, refused ones included, and requires the chosen one to be the step itself. A chain therefore shows everything the AI considered at each step and why each refused candidate was refused. What it cannot show is a candidate that was never recorded: the enforcer records every proposal it receives, but whoever holds the device key could have left one out.
+
+Tripwire's rule that only one branch of a parent can be realized is relied on only as far as the enforcer's own head: a future whose parent is no longer the tip is refused.
+
+## The service
+
+The enforcer is its own process. It holds the device key and the chain, and serves a Unix socket that only its owner can open. The AI's side, `ethical-agent`, holds no key, charter or number. It can ask for the menu of action names and descriptions, the current state, and to propose and choose. When a fork has nothing eligible, the enforcer returns each refusal in words, such as that a band must come back toward its center. The agent asks the model again with that guidance, up to twice, which is how the bands pull the AI back.
+
+Each step is checked by the enforcer from its parent and written to disk before it is installed. A stored chain is never trusted on restart. Its genesis must be the one the key and charter produce, each step must verify from its parent, and each step is replayed through DSM's `prepare_advance_relationship` and `commit_advance`, so the DSM head is rebuilt and not read back. `ethical-audit` does the same with public material only.

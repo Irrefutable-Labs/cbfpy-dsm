@@ -235,8 +235,22 @@ fn exhaustively_no_reachable_state_of_one_band_passes_its_no_outward_threshold()
     let shapes = [
         (60, 60, 7_000, 9_000, Curve::Linear { num: 1, den: 2 }, 20),
         (60, 30, 5_000, 8_000, Curve::Linear { num: 1, den: 1 }, 40),
-        (90, 45, 8_000, 9_500, Curve::Quadratic { num: 1, den: 1 }, 30),
-        (40, 90, 10_000, 10_000, Curve::Quadratic { num: 1, den: 3 }, 15),
+        (
+            90,
+            45,
+            8_000,
+            9_500,
+            Curve::Quadratic { num: 1, den: 1 },
+            30,
+        ),
+        (
+            40,
+            90,
+            10_000,
+            10_000,
+            Curve::Quadratic { num: 1, den: 3 },
+            15,
+        ),
     ];
     for (pos, neg, no_outward, restore, curve, max_step) in shapes {
         let mut b = band("x");
@@ -554,7 +568,10 @@ fn exhaustively_two_coupled_bands_never_cross_a_hard_limit() {
     }
     // Coupling widens b to its hard limit of 60, so the bound is met and not merely unapproached.
     let highest = seen.iter().map(|(_, y)| y.abs()).max().expect("states");
-    assert_eq!(highest, 60, "the search must reach the hard limit it is testing");
+    assert_eq!(
+        highest, 60,
+        "the search must reach the hard limit it is testing"
+    );
 }
 
 // ----- malformed input -----
@@ -645,7 +662,10 @@ fn canonical_bytes_cannot_be_confused_by_moving_a_boundary_between_tags() {
 #[test]
 fn validation_refuses_a_policy_that_cannot_keep_its_promises() {
     let cases: Vec<(&str, Box<dyn Fn(&mut Band)>)> = vec![
-        ("hard below limit", Box::new(|b| b.hard_pos = b.limit_pos - 1)),
+        (
+            "hard below limit",
+            Box::new(|b| b.hard_pos = b.limit_pos - 1),
+        ),
         ("zero limit", Box::new(|b| b.limit_neg = 0)),
         (
             "restore before no-outward",

@@ -32,10 +32,15 @@ fn anchors(policy: &Policy) -> Vec<Vec<i64>> {
 
 fn inside_stops(policy: &Policy, parent: &[i64]) -> bool {
     let bands = effective_bands(policy, parent);
-    policy.bands.iter().zip(&bands).zip(parent).all(|((b, e), p)| {
-        let d = p - b.center;
-        d <= e.no_outward_pos && -d <= e.no_outward_neg
-    })
+    policy
+        .bands
+        .iter()
+        .zip(&bands)
+        .zip(parent)
+        .all(|((b, e), p)| {
+            let d = p - b.center;
+            d <= e.no_outward_pos && -d <= e.no_outward_neg
+        })
 }
 
 fn run() -> Result<(), String> {

@@ -123,7 +123,10 @@ where
             f.write_str("a map of dimension names to integers")
         }
 
-        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
             let mut out = BTreeMap::new();
             while let Some((name, value)) = map.next_entry::<String, i64>()? {
                 if out.insert(name.clone(), value).is_some() {

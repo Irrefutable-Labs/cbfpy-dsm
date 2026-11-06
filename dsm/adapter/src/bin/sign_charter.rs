@@ -26,11 +26,26 @@ fn run() -> Result<(), String> {
     let (policy, catalog) = parse_charter_config(&text).map_err(|e| e.to_string())?;
     let authority = keypair_from_seed(&[0xA1; 32]).map_err(|e| e.to_string())?;
     let signed = SignedCharter::sign(policy, catalog, &authority).map_err(|e| e.to_string())?;
-    let hex: String = signed.signature.iter().map(|b| format!("{b:02x}")).collect();
+    let hex: String = signed
+        .signature
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     std::fs::write(&out, hex).map_err(|e| format!("{out}: {e}"))?;
-    let public: String = authority.public.iter().map(|b| format!("{b:02x}")).collect();
+    let public: String = authority
+        .public
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     println!("authority public key {public}");
-    println!("policy hash {}", signed.policy_hash().iter().map(|b| format!("{b:02x}")).collect::<String>());
+    println!(
+        "policy hash {}",
+        signed
+            .policy_hash()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
     Ok(())
 }
 

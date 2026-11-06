@@ -14,8 +14,16 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 [[bin]]
-name = "ethical-demo"
-path = "src/bin/demo.rs"
+name = "ethical-enforcer"
+path = "src/bin/enforcer.rs"
+
+[[bin]]
+name = "ethical-agent"
+path = "src/bin/agent.rs"
+
+[[bin]]
+name = "ethical-audit"
+path = "src/bin/audit.rs"
 
 [[bin]]
 name = "ethical-sign-charter"

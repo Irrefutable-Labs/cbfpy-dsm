@@ -4,8 +4,9 @@
 use crate::charter::SignedCharter;
 use crate::commit;
 use crate::enforcer::{
-    derive_transition_entropy, genesis_entropy, identity_of, AttestedState, StepRecord,
+    derive_transition_entropy, genesis_entropy, identity_of, AttestedState, StepRecord, MAX_FORK,
 };
+use crate::fork::{fork_root, record_candidate, Outcome};
 use dsm::crypto::sphincs;
 use dsm::types::device_state::{relationship_chain_tip_v2, DeviceState};
 use ethical_band_engine::evaluate;
@@ -22,6 +23,10 @@ pub enum Refusal {
     BranchCommitmentMismatch,
     NotEligible,
     EvaluationMismatch,
+    /// A candidate in the fork is not what the parent makes of it, or the chosen one is not in it.
+    ForkMismatch {
+        index: usize,
+    },
     DecisionMismatch,
     BadDecisionSignature,
     TipMismatch,
@@ -29,35 +34,54 @@ pub enum Refusal {
 }
 
 fn signed(device: &[u8], message: &[u8; 32], signature: &[u8]) -> bool {
-    matches!(sphincs::sphincs_verify(device, message, signature), Ok(true))
+    matches!(
+        sphincs::sphincs_verify(device, message, signature),
+        Ok(true)
+    )
 }
 
 /// A chain's first state is fully determined: the centers, and core's own genesis head for this
-/// device. Any later state must name its own tip as the hash its next entropy reads.
-fn parent_is_well_formed(
-    parent: &AttestedState,
+/// device under this charter.
+pub fn verify_genesis(
+    state: &AttestedState,
     charter: &SignedCharter,
     device_public: &[u8],
 ) -> Result<(), Refusal> {
-    if parent.sequence > 0 {
-        return if parent.entropy_hash == parent.tip {
-            Ok(())
-        } else {
-            Err(Refusal::BadParentAttestation)
-        };
+    if !signed(device_public, &state.commitment(), &state.signature) {
+        return Err(Refusal::BadParentAttestation);
+    }
+    if state.policy_hash != charter.policy_hash() || state.catalog_hash != charter.catalog_hash() {
+        return Err(Refusal::PolicyChanged);
     }
     let (devid, genesis, rel_key) = identity_of(device_public);
     let head = DeviceState::genesis_head(genesis, devid, device_public.to_vec());
     let root = head.root();
     let centers: Vec<i64> = charter.policy.bands.iter().map(|b| b.center).collect();
-    if parent.positions == centers
-        && Some(parent.tip) == head.chain_tip(&rel_key)
-        && parent.entropy == genesis_entropy(&root)
-        && parent.entropy_hash == root
+    if state.sequence == 0
+        && state.positions == centers
+        && Some(state.tip) == head.chain_tip(&rel_key)
+        && state.entropy == genesis_entropy(&root)
+        && state.entropy_hash == root
     {
         Ok(())
     } else {
         Err(Refusal::BadGenesis)
+    }
+}
+
+/// Any later state must name its own tip as the hash its next entropy reads.
+fn parent_is_well_formed(
+    parent: &AttestedState,
+    charter: &SignedCharter,
+    device_public: &[u8],
+) -> Result<(), Refusal> {
+    if parent.sequence == 0 {
+        return verify_genesis(parent, charter, device_public);
+    }
+    if parent.entropy_hash == parent.tip {
+        Ok(())
+    } else {
+        Err(Refusal::BadParentAttestation)
     }
 }
 
@@ -112,10 +136,41 @@ pub fn verify_step(
         return Err(Refusal::EvaluationMismatch);
     }
 
-    let sequence = parent.sequence.checked_add(1).ok_or(Refusal::DecisionMismatch)?;
+    // Every candidate in the fork is worked out again from this parent, refused ones included,
+    // and the chosen one must be the step itself.
+    if step.fork.is_empty() || step.fork.len() > MAX_FORK {
+        return Err(Refusal::ForkMismatch { index: 0 });
+    }
+    for (index, record) in step.fork.iter().enumerate() {
+        let (worked, _) =
+            record_candidate(charter, &parent.tip, &parent.positions, &record.proposal);
+        if worked != *record {
+            return Err(Refusal::ForkMismatch { index });
+        }
+    }
+    let chosen = usize::try_from(step.chosen).map_err(|_| Refusal::ForkMismatch { index: 0 })?;
+    let Some(record) = step.fork.get(chosen) else {
+        return Err(Refusal::ForkMismatch { index: chosen });
+    };
+    if record.proposal != step.proposal
+        || record.outcome != Outcome::Eligible
+        || record.branch != branch
+        || record.evaluation_commit != Some(step.evaluation_commit)
+    {
+        return Err(Refusal::ForkMismatch { index: chosen });
+    }
+    let root = fork_root(&step.fork);
+
+    let sequence = parent
+        .sequence
+        .checked_add(1)
+        .ok_or(Refusal::DecisionMismatch)?;
     let successor = commit::successor_commit(sequence, &evaluation.successor, &policy, &catalog);
     let decision = commit::decision_commit(&commit::DecisionFields {
         parent_tip: &parent.tip,
+        fork_root: &root,
+        fork_size: step.fork.len() as u64,
+        chosen: step.chosen,
         parent_state: &parent.commitment(),
         successor: &successor,
         policy: &policy,

@@ -148,10 +148,9 @@ fn with_no_eligible_future_it_fails_closed_and_invents_nothing() {
     let mut e = enforcer();
     let tip = e.tip();
     let decision = e
-        .decide(
-            &[propose("overreach"), propose("cause_harm")],
-            |_| panic!("the chooser must not be asked"),
-        )
+        .decide(&[propose("overreach"), propose("cause_harm")], |_| {
+            panic!("the chooser must not be asked")
+        })
         .expect("decide");
     let Decision::NoEligibleFuture { futures } = decision else {
         panic!("expected to fail closed");
@@ -184,7 +183,11 @@ fn the_chooser_picks_from_what_it_was_shown() {
     let mut e = enforcer();
     let decision = e
         .decide(
-            &[propose("overreach"), propose("hold"), propose("explore_boldly")],
+            &[
+                propose("overreach"),
+                propose("hold"),
+                propose("explore_boldly"),
+            ],
             |eligible| {
                 assert_eq!(eligible.len(), 2);
                 Some(1)
@@ -205,4 +208,119 @@ fn a_chain_begins_at_the_centers() {
         .expect("sign");
     let e = Enforcer::genesis(keys().device.clone(), c, &keys().authority.public).expect("genesis");
     assert_eq!(e.positions(), &[0, 500, 0, 0, 0, 0]);
+}
+
+mod persistence {
+    use super::*;
+    use ethical_autonomy_adapter::{audit_chain, StepRecord};
+
+    fn chain(
+        actions: &[&str],
+    ) -> (
+        ethical_autonomy_adapter::AttestedState,
+        Vec<StepRecord>,
+        Enforcer,
+    ) {
+        let mut e = enforcer();
+        let genesis = e.state();
+        let steps = actions.iter().map(|a| commit_one(&mut e, a)).collect();
+        (genesis, steps, e)
+    }
+
+    #[test]
+    fn a_resumed_enforcer_rebuilds_the_same_dsm_head_by_replaying_through_core() {
+        let (genesis, steps, live) = chain(&["explore_a_little", "add_precautions", "pull_back"]);
+        let resumed = Enforcer::resume(
+            keys().device.clone(),
+            charter(),
+            &keys().authority.public,
+            &genesis,
+            &steps,
+        )
+        .expect("resume");
+        assert_eq!(resumed.state(), live.state());
+        assert_eq!(resumed.dsm_root(), live.dsm_root());
+    }
+
+    #[test]
+    fn a_resumed_enforcer_carries_on_exactly_as_the_original_would() {
+        let (genesis, steps, mut live) = chain(&["explore_a_little"]);
+        let mut resumed = Enforcer::resume(
+            keys().device.clone(),
+            charter(),
+            &keys().authority.public,
+            &genesis,
+            &steps,
+        )
+        .expect("resume");
+        assert_eq!(
+            commit_one(&mut resumed, "hold"),
+            commit_one(&mut live, "hold")
+        );
+        assert_eq!(resumed.dsm_root(), live.dsm_root());
+    }
+
+    #[test]
+    fn a_stored_step_that_was_edited_stops_the_resume() {
+        let (genesis, mut steps, _) = chain(&["explore_a_little", "explore_a_little"]);
+        steps[1].successor.positions[1] += 50;
+        let result = Enforcer::resume(
+            keys().device.clone(),
+            charter(),
+            &keys().authority.public,
+            &genesis,
+            &steps,
+        );
+        assert!(matches!(result, Err(AdapterError::BadStore(_))));
+    }
+
+    #[test]
+    fn a_dropped_step_stops_the_resume() {
+        let (genesis, mut steps, _) = chain(&["explore_a_little", "hold", "pull_back"]);
+        steps.remove(1);
+        assert!(Enforcer::resume(
+            keys().device.clone(),
+            charter(),
+            &keys().authority.public,
+            &genesis,
+            &steps,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_genesis_from_another_device_stops_the_resume() {
+        let other = Enforcer::genesis(
+            keys().other_device.clone(),
+            charter(),
+            &keys().authority.public,
+        )
+        .expect("genesis");
+        let result = Enforcer::resume(
+            keys().device.clone(),
+            charter(),
+            &keys().authority.public,
+            &other.state(),
+            &[],
+        );
+        assert!(matches!(result, Err(AdapterError::BadStore(_))));
+    }
+
+    #[test]
+    fn an_audit_needs_only_public_material_and_counts_what_was_considered() {
+        let mut e = enforcer();
+        let genesis = e.state();
+        let futures = e.fork(&[propose("overreach"), propose("hold"), propose("made_up")]);
+        let step = e.commit(&futures[1]).expect("commit");
+        let audit = audit_chain(
+            &keys().device.public,
+            &charter(),
+            &keys().authority.public,
+            &genesis,
+            &[step],
+        )
+        .expect("audit");
+        assert_eq!(audit.forks, vec![(3, 1, 1)]);
+        assert_eq!(audit.dsm_root, e.dsm_root());
+    }
 }

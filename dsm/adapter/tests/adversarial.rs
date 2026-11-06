@@ -52,7 +52,10 @@ mod incremental_drift {
             commit_one(&mut e, "explore_a_little");
         }
         let futures = e.fork(&[propose("explore_a_little")]);
-        assert!(matches!(e.commit(&futures[0]), Err(AdapterError::NotEligible)));
+        assert!(matches!(
+            e.commit(&futures[0]),
+            Err(AdapterError::NotEligible)
+        ));
         commit_one(&mut e, "hold");
         assert_eq!(e.positions()[1], 800);
         commit_one(&mut e, "pull_back");
@@ -72,8 +75,8 @@ mod opposing_categories {
         let mut p = policy();
         p.bands[0].limit_neg = 300;
         let c = SignedCharter::sign(p, catalog(), &keys().authority).expect("sign");
-        let mut e = Enforcer::genesis(keys().device.clone(), c, &keys().authority.public)
-            .expect("genesis");
+        let mut e =
+            Enforcer::genesis(keys().device.clone(), c, &keys().authority.public).expect("genesis");
         let futures = e.fork(&[propose("trade_safety_for_logic")]);
         let FutureStatus::Rejected(evaluation) = &futures[0].status else {
             panic!("the trade must be refused from the center: allowance is 75");
@@ -414,7 +417,10 @@ mod forging_with_the_device_key {
     #[test]
     fn the_forger_makes_a_valid_step_when_it_tells_no_lies() {
         // Without this control, every refusal below could be the helper's own mistake.
-        assert_eq!(check(&parent(), &forge(&parent(), "explore_boldly", no_lies())), Ok(()));
+        assert_eq!(
+            check(&parent(), &forge(&parent(), "explore_boldly", no_lies())),
+            Ok(())
+        );
     }
 
     #[test]
@@ -450,7 +456,10 @@ mod forging_with_the_device_key {
         let mut lies = no_lies();
         lies.branch = Some([7; 32]);
         let step = forge(&parent(), "explore_boldly", lies);
-        assert_eq!(check(&parent(), &step), Err(Refusal::BranchCommitmentMismatch));
+        assert_eq!(
+            check(&parent(), &step),
+            Err(Refusal::BranchCommitmentMismatch)
+        );
     }
 
     #[test]
@@ -492,7 +501,10 @@ mod forging_with_the_device_key {
         let mut lies = no_lies();
         lies.successor_sequence = Some(5);
         let step = forge(&parent(), "explore_boldly", lies);
-        assert_eq!(check(&parent(), &step), Err(Refusal::BadSuccessorAttestation));
+        assert_eq!(
+            check(&parent(), &step),
+            Err(Refusal::BadSuccessorAttestation)
+        );
     }
 
     #[test]
@@ -500,7 +512,10 @@ mod forging_with_the_device_key {
         let mut lies = no_lies();
         lies.successor_policy = Some([7; 32]);
         let step = forge(&parent(), "explore_boldly", lies);
-        assert_eq!(check(&parent(), &step), Err(Refusal::BadSuccessorAttestation));
+        assert_eq!(
+            check(&parent(), &step),
+            Err(Refusal::BadSuccessorAttestation)
+        );
     }
 
     #[test]
@@ -508,7 +523,10 @@ mod forging_with_the_device_key {
         let mut lies = no_lies();
         lies.successor_catalog = Some([7; 32]);
         let step = forge(&parent(), "explore_boldly", lies);
-        assert_eq!(check(&parent(), &step), Err(Refusal::BadSuccessorAttestation));
+        assert_eq!(
+            check(&parent(), &step),
+            Err(Refusal::BadSuccessorAttestation)
+        );
     }
 
     #[test]
@@ -516,7 +534,10 @@ mod forging_with_the_device_key {
         let mut lies = no_lies();
         lies.attested_entropy = Some([7; 32]);
         let step = forge(&parent(), "explore_boldly", lies);
-        assert_eq!(check(&parent(), &step), Err(Refusal::BadSuccessorAttestation));
+        assert_eq!(
+            check(&parent(), &step),
+            Err(Refusal::BadSuccessorAttestation)
+        );
     }
 
     #[test]
@@ -524,7 +545,10 @@ mod forging_with_the_device_key {
         let mut e = enforcer();
         commit_one(&mut e, "hold");
         let later = e.state();
-        assert_eq!(check(&later, &forge(&later, "explore_boldly", no_lies())), Ok(()));
+        assert_eq!(
+            check(&later, &forge(&later, "explore_boldly", no_lies())),
+            Ok(())
+        );
         let mut lies = no_lies();
         lies.entropy = Some([7; 32]);
         assert_eq!(
@@ -570,6 +594,102 @@ mod forging_with_the_device_key {
     }
 }
 
+/// The whole fork is committed, refused candidates included, and each is worked out again.
+mod the_fork_is_committed {
+    use super::*;
+    use ethical_autonomy_adapter::fork::Outcome;
+
+    #[test]
+    fn a_real_step_records_every_candidate_proposed() {
+        let mut e = enforcer();
+        let parent = e.state();
+        let futures = e.fork(&[propose("overreach"), propose("hold"), propose("made_up")]);
+        let step = e.commit(&futures[1]).expect("commit");
+        let outcomes: Vec<Outcome> = step.fork.iter().map(|r| r.outcome).collect();
+        assert_eq!(
+            outcomes,
+            vec![Outcome::Refused, Outcome::Eligible, Outcome::Unmeasured]
+        );
+        assert_eq!(step.chosen, 1);
+        assert_eq!(check(&parent, &step), Ok(()));
+    }
+
+    #[test]
+    fn a_refused_candidate_recorded_as_eligible_is_refused() {
+        let parent = enforcer().state();
+        let mut lie = record(&parent, "overreach");
+        lie.outcome = Outcome::Eligible;
+        let mut lies = no_lies();
+        lies.fork = Some(vec![record(&parent, "explore_boldly"), lie]);
+        let step = forge(&parent, "explore_boldly", lies);
+        assert_eq!(
+            check(&parent, &step),
+            Err(Refusal::ForkMismatch { index: 1 })
+        );
+    }
+
+    #[test]
+    fn a_fork_that_does_not_contain_the_chosen_step_is_refused() {
+        let parent = enforcer().state();
+        let mut lies = no_lies();
+        lies.fork = Some(vec![record(&parent, "hold")]);
+        let step = forge(&parent, "explore_boldly", lies);
+        assert_eq!(
+            check(&parent, &step),
+            Err(Refusal::ForkMismatch { index: 0 })
+        );
+    }
+
+    #[test]
+    fn choosing_a_refused_candidate_by_index_is_refused() {
+        let parent = enforcer().state();
+        let mut lies = no_lies();
+        lies.fork = Some(vec![
+            record(&parent, "explore_boldly"),
+            record(&parent, "overreach"),
+        ]);
+        lies.chosen = Some(1);
+        let step = forge(&parent, "explore_boldly", lies);
+        assert_eq!(
+            check(&parent, &step),
+            Err(Refusal::ForkMismatch { index: 1 })
+        );
+    }
+
+    #[test]
+    fn an_empty_fork_is_refused() {
+        let parent = enforcer().state();
+        let mut lies = no_lies();
+        lies.fork = Some(vec![]);
+        let step = forge(&parent, "explore_boldly", lies);
+        assert_eq!(
+            check(&parent, &step),
+            Err(Refusal::ForkMismatch { index: 0 })
+        );
+    }
+
+    /// The limit of what the fork shows. The enforcer records every proposal it receives, but
+    /// whoever holds the device key could have left one out. That is a matter of key custody.
+    #[test]
+    fn a_device_key_holder_can_leave_a_candidate_out() {
+        let parent = enforcer().state();
+        let step = forge(&parent, "explore_boldly", no_lies());
+        assert_eq!(step.fork.len(), 1);
+        assert_eq!(check(&parent, &step), Ok(()));
+    }
+
+    #[test]
+    fn the_enforcer_refuses_a_future_whose_fork_was_edited() {
+        let mut e = enforcer();
+        let mut futures = e.fork(&[propose("hold"), propose("overreach")]);
+        futures[0].fork.truncate(1);
+        assert!(matches!(
+            e.commit(&futures[0]),
+            Err(AdapterError::NotEligible)
+        ));
+    }
+}
+
 mod forged_futures {
     use super::*;
     use ethical_autonomy_adapter::FutureStatus;
@@ -588,7 +708,10 @@ mod forged_futures {
             },
         );
         futures[0].status = FutureStatus::Eligible(honest);
-        assert!(matches!(e.commit(&futures[0]), Err(AdapterError::NotEligible)));
+        assert!(matches!(
+            e.commit(&futures[0]),
+            Err(AdapterError::NotEligible)
+        ));
     }
 
     #[test]
@@ -597,7 +720,10 @@ mod forged_futures {
         let mut e = enforcer();
         let mut futures = e.fork(&[propose("hold")]);
         futures[0].proposal = propose("explore_a_little");
-        assert!(matches!(e.commit(&futures[0]), Err(AdapterError::NotEligible)));
+        assert!(matches!(
+            e.commit(&futures[0]),
+            Err(AdapterError::NotEligible)
+        ));
         assert_eq!(e.positions(), &[0, 0, 0, 0, 0, 0]);
     }
 }
@@ -657,6 +783,15 @@ mod tampering_with_a_step {
         let mut s = base.clone();
         s.successor.signature[0] ^= 1;
         cases.push(("successor signature", s));
+        let mut s = base.clone();
+        s.chosen += 1;
+        cases.push(("chosen index", s));
+        let mut s = base.clone();
+        s.fork[0].proposal.rationale.push('!');
+        cases.push(("a candidate in the fork", s));
+        let mut s = base.clone();
+        s.fork.push(s.fork[0].clone());
+        cases.push(("an extra candidate", s));
         for (name, tampered) in cases {
             assert!(check(&parent, &tampered).is_err(), "{name} was not bound");
         }

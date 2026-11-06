@@ -124,14 +124,34 @@ pub struct Measurement {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Rejection {
-    Prohibited { tag: String },
-    WrongDimensionCount { expected: usize, got: usize },
-    OutOfRange { dim: usize },
-    ParentOutsideHardLimit { dim: usize },
-    HardLimit { dim: usize },
-    MaxStep { dim: usize },
-    OutwardExceeded { dim: usize, outward: i64, allowed: i64 },
-    RestoreRequired { dim: usize, required: i64 },
+    Prohibited {
+        tag: String,
+    },
+    WrongDimensionCount {
+        expected: usize,
+        got: usize,
+    },
+    OutOfRange {
+        dim: usize,
+    },
+    ParentOutsideHardLimit {
+        dim: usize,
+    },
+    HardLimit {
+        dim: usize,
+    },
+    MaxStep {
+        dim: usize,
+    },
+    OutwardExceeded {
+        dim: usize,
+        outward: i64,
+        allowed: i64,
+    },
+    RestoreRequired {
+        dim: usize,
+        required: i64,
+    },
 }
 
 /// A band's limits and thresholds after coupling, at one parent.
@@ -284,7 +304,11 @@ impl Policy {
             if !in_bound(b.center) || !in_bound(b.hard_pos) || !in_bound(b.hard_neg) {
                 return Err(PolicyError::OutOfRange);
             }
-            if b.limit_pos < 1 || b.limit_neg < 1 || b.hard_pos < b.limit_pos || b.hard_neg < b.limit_neg {
+            if b.limit_pos < 1
+                || b.limit_neg < 1
+                || b.hard_pos < b.limit_pos
+                || b.hard_neg < b.limit_neg
+            {
                 return Err(PolicyError::BadBandShape);
             }
             if b.no_outward_bp == 0
@@ -297,7 +321,11 @@ impl Policy {
             if den == 0 || num == 0 || num > den {
                 return Err(PolicyError::BadCurve);
             }
-            if b.max_step < 1 || !in_bound(b.max_step) || b.restore_progress < 1 || b.restore_progress > b.max_step {
+            if b.max_step < 1
+                || !in_bound(b.max_step)
+                || b.restore_progress < 1
+                || b.restore_progress > b.max_step
+            {
                 return Err(PolicyError::BadStep);
             }
         }
@@ -398,7 +426,11 @@ impl Policy {
                 put_i64(&mut out, x);
             }
             match rule.effect {
-                Effect::Adjust { target, side, delta } => {
+                Effect::Adjust {
+                    target,
+                    side,
+                    delta,
+                } => {
                     out.push(1);
                     put_u64(&mut out, target as u64);
                     out.push(match side {
@@ -466,7 +498,11 @@ pub fn effective_bands(policy: &Policy, parent: &[i64]) -> Vec<EffectiveBand> {
             let (mut pos, mut neg, mut forced) = (0i64, 0i64, 0i64);
             for rule in &fired {
                 match rule.effect {
-                    Effect::Adjust { target, side, delta } if target == dim => {
+                    Effect::Adjust {
+                        target,
+                        side,
+                        delta,
+                    } if target == dim => {
                         if matches!(side, Side::Positive | Side::Both) {
                             pos = pos.saturating_add(delta);
                         }
@@ -642,7 +678,11 @@ pub fn evaluate(policy: &Policy, parent: &[i64], measurement: &Measurement) -> E
             });
         }
 
-        let restore_threshold = if d >= 0 { eff.restore_pos } else { eff.restore_neg };
+        let restore_threshold = if d >= 0 {
+            eff.restore_pos
+        } else {
+            eff.restore_neg
+        };
         let band_requires = if d.abs() > restore_threshold {
             band.restore_progress
         } else {

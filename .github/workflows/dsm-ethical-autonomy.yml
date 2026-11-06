@@ -25,6 +25,24 @@ jobs:
       - name: Tests
         run: cargo test --release --locked --no-fail-fast
 
+  lint:
+    name: Formatting and Clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dsm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dsm
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --release --all-targets --locked -- -D warnings
+
   cbfpy:
     name: CBFpy cross-check on the charter
     runs-on: ubuntu-latest
