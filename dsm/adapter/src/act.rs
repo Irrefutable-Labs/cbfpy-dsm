@@ -4,8 +4,9 @@
 //! command, which file, which recipient. The model supplies at most a piece of text. The enforcer
 //! runs an act only after its step is committed, writes only inside its world directory, and
 //! signs a receipt of exactly what it wrote. Every path is keyed by the step's sequence or fixed
-//! by the charter, so running an act again after a crash writes the same bytes. A command can
-//! write nothing at all, so running it again has no effect beyond its own output.
+//! by the charter, so running a reply, journal, message or file act again after a crash writes
+//! the same bytes. A command can write nothing, so running it again has no effect beyond its own
+//! output, which may differ: it is the second run's output that the receipt then records.
 
 use crate::charter::Keypair;
 use crate::commit;
@@ -183,8 +184,17 @@ fn put(world: &Path, relative: &str, bytes: &[u8]) -> Result<Output, AdapterErro
         .ok_or_else(|| AdapterError::Effect("no parent directory".to_string()))?;
     std::fs::create_dir_all(dir).map_err(io)?;
     let temporary = dir.join(format!(".{}.partial", std::process::id()));
-    std::fs::write(&temporary, bytes).map_err(io)?;
+    {
+        let mut file = std::fs::File::create(&temporary).map_err(io)?;
+        std::io::Write::write_all(&mut file, bytes).map_err(io)?;
+        // Durable before its receipt can be: a receipt never names a file that a power loss
+        // could take away.
+        file.sync_all().map_err(io)?;
+    }
     std::fs::rename(&temporary, &path).map_err(io)?;
+    std::fs::File::open(dir)
+        .and_then(|d| d.sync_all())
+        .map_err(io)?;
     Ok(Output {
         path: relative.to_string(),
         hash: file_hash(bytes),
@@ -203,11 +213,21 @@ fn confined(world: &Path, argv: &[String]) -> Result<Command, AdapterError> {
         .ok_or_else(|| {
             AdapterError::Effect("the world's path cannot be named in a profile".to_string())
         })?;
+    // macOS's own base profile is imported so a program can start at all, and everything it
+    // grants beyond that is then taken back: no file reads or metadata outside the listed system
+    // directories and the world, no writes but to /dev/null, and no system services. The one
+    // exception macOS keeps is reading the user's text-encoding preference.
+    let allowed = format!(
+        "(literal \"/\") (subpath \"/usr\") (subpath \"/bin\") (subpath \"/System\") \
+         (subpath \"/Library/Apple\") (subpath \"/private/var/db\") \
+         (subpath \"/private/var/select\") (subpath \"/dev\") (subpath \"{world}\")"
+    );
     let profile = format!(
         "(version 1)(deny default)(import \"bsd.sb\")(allow process-exec process-fork)\
-         (allow file-read* (literal \"/\") (subpath \"/usr\") (subpath \"/bin\") \
-         (subpath \"/System\") (subpath \"/Library/Apple\") (subpath \"/private/var/db\") \
-         (subpath \"/dev\") (subpath \"{world}\"))(allow file-write* (literal \"/dev/null\"))"
+         (deny file-read* file-read-metadata file-write* mach-lookup)\
+         (allow file-read* file-read-metadata {allowed})\
+         (allow file-write-data (literal \"/dev/null\"))\
+         (deny file-read* file-write* (regex #\"/\\.CFUserTextEncoding$\"))"
     );
     let mut c = Command::new("/usr/bin/sandbox-exec");
     c.arg("-p").arg(profile).args(argv).current_dir(world);
@@ -291,7 +311,10 @@ pub fn run_command(
     limit: Duration,
 ) -> Result<Vec<u8>, AdapterError> {
     confinement_works(world)?;
-    let mut child = confined(world, argv)?
+    let mut command = confined(world, argv)?;
+    // Its own process group, so the time limit can stop every process it starts.
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command
         .env_clear()
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -316,6 +339,10 @@ pub fn run_command(
             break Some(status);
         }
         if started.elapsed() > limit {
+            if let Ok(group) = libc::pid_t::try_from(child.id()) {
+                // SAFETY: the group was created for this command alone, just above.
+                unsafe { libc::killpg(group, libc::SIGKILL) };
+            }
             let _ = child.kill();
             let _ = child.wait();
             break None;
@@ -332,6 +359,26 @@ pub fn run_command(
         None => out.extend_from_slice(b"\n[stopped after the time limit]\n"),
     }
     Ok(out)
+}
+
+/// Whether `outputs` are exactly what `act` writes for the step at `sequence` with `text`: the
+/// same paths and, for every act but a command, the same bytes. A command's output cannot be
+/// known in advance, so it must be one file at its own path.
+pub fn outputs_fit(sequence: u64, act: &Act, text: &str, outputs: &[Output]) -> bool {
+    let n = format!("{sequence:06}");
+    let one = |path: String| {
+        outputs.len() == 1
+            && outputs[0].path == path
+            && outputs[0].hash == file_hash(text.as_bytes())
+    };
+    match act {
+        Act::None => outputs.is_empty(),
+        Act::Reply => one(format!("replies/{n}.txt")),
+        Act::Journal => one(format!("journal/{n}.md")),
+        Act::Message { recipient } => one(format!("outbox/{recipient}/{n}.txt")),
+        Act::WriteFile { name } => one(format!("files/{name}")),
+        Act::Run { .. } => outputs.len() == 1 && outputs[0].path == format!("runs/{n}.out"),
+    }
 }
 
 /// Carry out `act` for the step at `sequence`, with the model's `text`. Called only by the
@@ -386,15 +433,23 @@ pub fn sweep_partial(world: &Path) -> Result<usize, AdapterError> {
 fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, PathBuf)>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
-        if path.is_dir() {
+        // Never follow a link, and never open anything but a regular file: only the enforcer
+        // writes here, and it writes neither.
+        let kind = std::fs::symlink_metadata(&path)?.file_type();
+        if kind.is_dir() {
             walk(&path, root, out)?;
-        } else {
+        } else if kind.is_file() {
             let relative = path
                 .strip_prefix(root)
                 .map_err(std::io::Error::other)?
                 .to_string_lossy()
                 .to_string();
             out.push((relative, path));
+        } else {
+            return Err(std::io::Error::other(format!(
+                "{} is not a regular file or directory",
+                path.display()
+            )));
         }
     }
     Ok(())

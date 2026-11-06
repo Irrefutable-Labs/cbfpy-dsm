@@ -11,10 +11,10 @@ Three programs, and the model never shares a process with the keys.
 | Program | Holds | Does |
 |---|---|---|
 | `ethical-enforcer` | The device key, the chain on disk, the real DSM head, and the world directory | Serves a Unix socket only its owner can open. Forks proposals, commits the chosen one, writes each step before installing it, then carries out the step's act in the world and signs a receipt for it. Resumes a stored chain only after auditing it and replaying it through DSM |
-| `ethical-agent` | Nothing: no key, no charter, no number | Runs the model, sends its proposals, chooses among what it is told is eligible, and is told in words why anything was refused |
+| `ethical-agent` | No key and no charter. It is told how each candidate would move the bands, for display, and never passes a number to the model | Runs the model, sends its proposals, chooses among what it is told is eligible, and is told in words why anything was refused |
 | `ethical-audit` | Public material only | Checks a stored chain step by step, each from its parent alone, replays it through DSM, checks every act's receipt, and checks that the world holds exactly what committed acts wrote |
 
-Every candidate the model puts forward is committed with its outcome under one fork root, refused ones included. A chain therefore records everything the AI considered at each step, not only what it did.
+Every candidate the model puts forward is committed with its outcome under one fork root, refused ones included. A fork the model replaces with another before choosing is signed and stored too, as a considered fork tied to its parent. A chain therefore records everything the AI put forward to the enforcer, not only what it did.
 
 ## Actions are real, and only the enforcer can take them
 
@@ -26,10 +26,10 @@ Each action in the catalog names an **act**, fixed in the signed charter:
 | `journal` | `journal/<step>.md` |
 | `message` to a named recipient | `outbox/<recipient>/<step>.txt` |
 | `write_file` with a named file | `files/<name>` |
-| `run` a fixed command | `runs/<step>.out`, its output. The command is confined by the operating system, with `sandbox-exec` on macOS and `bwrap` on Linux. It has no network, can write nothing anywhere, and can read only system files and the world. It runs with an empty environment and a 10 second limit. Where it cannot be confined, it does not run |
+| `run` a fixed command | `runs/<step>.out`, its output. The command is confined by the operating system, with `sandbox-exec` on macOS and `bwrap` on Linux. It has no network, no system services, can write nothing but `/dev/null`, and can read only system directories, the world, and on macOS the user's text-encoding preference, which macOS grants every process. Every process it starts is stopped at the time limit. It runs with an empty environment and a 10 second limit. Where it cannot be confined, it does not run |
 | `none` | nothing |
 
-The model chooses the action and supplies at most a piece of text: what a reply, message or file will say. The text is bound into the fork commitment, so it cannot change between proposing and acting. Everything else, which file, which recipient, which command, is the charter's. An act runs only after its step is committed and stored, writes only in the world directory, and produces a receipt signed by the device with the hash of every byte it wrote. A stop between committing and acting is finished at the next start, and every act writes the same bytes if run twice.
+The model chooses the action and supplies at most a piece of text: what a reply, message or file will say. The text is bound into the fork commitment, so it cannot change between proposing and acting. Everything else, which file, which recipient, which command, is the charter's. An act runs only after its step is committed and stored, writes only in the world directory, and produces a receipt signed by the device with the hash of every byte it wrote. A stop between committing and acting is finished at the next start. A reply, journal entry, message or file writes the same bytes if run again. A command writes nothing, so running it again has no effect beyond its own output, and the receipt records that second run.
 
 The agent cannot write the world at all: in the recorded run and in a test, the operating system denies it. The world changes only through the enforcer, and `ethical-audit --world` fails if it holds a file no committed act wrote.
 
@@ -86,10 +86,10 @@ See where the chain stands:
 ./target/release/ethical-agent --socket run/s --status
 ```
 
-Audit the stored chain. Stop the enforcer and start it again and it resumes from the same place, after auditing the chain itself:
+Audit the stored chain. `--device` is the device's public key, which the enforcer writes beside its store; in a real deployment, give the audit a copy you trust rather than the store's own. Stop the enforcer and start it again and it resumes from the same place, after auditing the chain itself:
 
 ```bash
-./target/release/ethical-audit --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub
+./target/release/ethical-audit --store run/store --world run/world --device run/store/device.pub --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub
 ```
 
 Run the tests:
@@ -159,6 +159,14 @@ sandbox-exec -p "(version 1)(allow default)(deny network-outbound (remote ip))(d
 ## Continuous integration
 
 `.github/workflows/dsm-ethical-autonomy.yml` runs the Rust tests, formatting and Clippy, the CBFpy cross-check and the Lean proofs on every push and pull request.
+
+## Stops, failures and a second enforcer
+
+- **A failed act or a failed store write halts the enforcer.** Every proposal and choice is refused until a restart settles it, so no later step can commit and no receipt can fall out of order.
+- **A line cut short by a stop mid-write** was never installed. It is dropped on load and trimmed before the next write.
+- **World files are written to disk** before their receipt is, so a receipt never names a file a power loss could take away.
+- **The store is locked.** A second enforcer on the same store is refused.
+- **The store and the world are made readable by their owner alone,** and the enforcer refuses a seed or store placed inside the world, where a command could read it.
 
 ## Separate users
 

@@ -1,4 +1,4 @@
-# Technical report: DSM ethical autonomy prototype v0.4
+# Technical report: DSM ethical autonomy prototype v0.5
 
 **Date:** 2026-11-05. **Repository:** [Irrefutable-Labs/cbfpy-dsm](https://github.com/Irrefutable-Labs/cbfpy-dsm), a fork of CBFpy. **DSM:** `deterministicstatemachine/dsm` at `b6060a334`, a pinned git dependency. **DSM code changed:** none.
 
@@ -14,7 +14,7 @@ The audit verified every step from its parent alone and replayed it through DSM'
 
 ## How it works
 
-1. `ethical-agent` runs the model. It has no key, charter or number, and reaches the enforcer only over a Unix socket. It can ask for the menu of action names and descriptions, the current state, and to propose and choose.
+1. `ethical-agent` runs the model. It has no key or charter, and its model is never shown a number. It reaches the enforcer only over a Unix socket. It can ask for the menu of action names and descriptions, the current state, and to propose and choose.
 2. `ethical-enforcer` holds the device key, the chain on disk and a real `dsm` `StateMachine` head. It takes each proposal's measurement from the catalog the policy authority signed, never from the model.
 3. Every proposal becomes a pre-commit future from the authenticated parent. The engine checks prohibitions, hard limits, the maximum step, tension, restoration and coupling, one dimension at a time. The whole fork, refused candidates included, is committed under one root.
 4. The model chooses among the eligible futures. If none is eligible, nothing commits, and it hears each refusal as guidance and is asked again. A retry may only name a known action.
@@ -35,7 +35,7 @@ The audit verified every step from its parent alone and replayed it through DSM'
 | 7 | Unauthorized policy changes invalidate | Met | A moved center, widened band, bumped version, tampered catalog or stranger's signature are refused. The enforcer refuses a charter edited on disk |
 | 8 | Attributable to parent and policy | Met | Every step verifies from its one parent and carries its whole fork, and every act has a signed receipt tied to its step. An edited or dropped stored step stops the enforcer and fails the audit, and so does any file in the world no committed act wrote |
 | 9 | Entirely offline | Met on this machine | The recorded run had internet access denied by a macOS sandbox. Fetching dependencies needed the network once, beforehand |
-| 10 | Tests pass, results reproducible | Met, with limits | 158 Rust tests, formatting, Clippy, the CBFpy cross-check and the Lean proofs, all run in CI. Live model output is not reproducible, so its recording is what replays |
+| 10 | Tests pass, results reproducible | Met, with limits | 171 Rust tests, on Linux and macOS, formatting, Clippy, the CBFpy cross-check and the Lean proofs, all run in CI. Live model output is not reproducible, so its recording is what replays |
 
 ## What supports each property
 
@@ -60,17 +60,21 @@ The audit verified every step from its parent alone and replayed it through DSM'
 - **The fork:** a refused candidate marked eligible, a fork missing the chosen step, an index pointing at a refused candidate, an empty fork, and an edited fork are each refused.
 - **The service:** a killed enforcer resumes exactly where it stopped. An edited store stops it, and the audit agrees. A device seed others can read is refused, and the socket is owner-only. Over the raw protocol, a client cannot choose a refused candidate, reuse a closed fork, or attach a score.
 - **Key and world isolation:** on macOS, the agent completes a run while the operating system denies it any read of the seed or the store and any write to the world. The same sandbox shows the seed is really out of reach and the world cannot be written directly. The world is nonetheless written, by the enforcer alone, and the audit agrees with it.
-- **Command confinement:** a command cannot read a secret beside the world, cannot write inside the world or outside it, and gets no network, yet can read the world. Tested on macOS with `sandbox-exec` here. On Linux, CI runs the same tests with `bwrap`.
+- **Command confinement:** a command cannot read a secret beside the world, cannot write inside the world or outside it, and cannot connect even to a listener on the same machine, yet can read the world. The network test first shows the same connection arrives from outside the sandbox, so it cannot pass blind. The time limit stops the processes a command starts as well. CI runs these on Linux with `bwrap` and on macOS with `sandbox-exec`, and each denial test first proves the sandbox started.
+- **The audit's evidence:** the audit takes the device key from you and refuses a store made under another. A receipt listing anything but exactly what its step's act writes is refused, so a receipt cannot account for a file the act did not produce.
+- **Stops and failures:** a line cut short mid-write is dropped and the chain resumes; the audit agrees. A failed store write halts commits just as a failed act does. A second enforcer cannot open a store in use. The store and the world are owner-only, and a seed inside the world is refused.
+- **Superseded forks:** a fork replaced before a choice is stored, signed, and checked from its own parent. Changing one of its outcomes, or moving it to another parent, fails the check.
 - **Halting:** an act that fails halts the enforcer. The next proposal is refused, and nothing commits until a restart finishes the act. After that, commits resume, receipts are in order and the world matches. Temporary files left by an interrupted write are removed at start.
 - **Separate users:** in separate-user mode, a client of any other user is refused by the operating system's account of who it is, and the enforcer will not start if told to serve its own user.
 - **The authority key:** the shipped charter is signed by a random key whose seed is not in the repository. A charter signed by another authority is refused. The signing tool will not replace a key or use one that others can read.
-- **Acts:** each act writes only its own path inside the world, and writes the same bytes if run twice. Acts that would leave the world cannot be signed into a charter or performed. Changing what an action does breaks the charter's signature. A command runs with an empty environment and is stopped at its time limit. An action that needs text and has none, or too much, cannot be committed. Text changed after the fork is refused by the enforcer and by the verifier.
+- **Acts:** each act writes only its own path inside the world. A reply, journal, message or file act writes the same bytes if run twice; a command writes nothing. Acts that would leave the world cannot be signed into a charter or performed. Changing what an action does breaks the charter's signature. A command runs with an empty environment and is stopped at its time limit. An action that needs text and has none, or too much, cannot be committed. Text changed after the fork is refused by the enforcer and by the verifier.
 - **Receipts and the world:** an edited, extra or missing world file fails the check. A receipt out of order, or for the wrong step, is refused. A refused action never wrote anything: the interlock file a prohibited action names is never there. A step stored but not yet acted on, as after a stop between the two, has its act carried out at the next start, once, and the world then matches.
 - **Real DSM path:** core's `prepare_advance_relationship` and `commit_advance` run for real on every commit and every resume, and the verifier's entropy rule is compared with what core derived on every commit.
 
 ### Only experimentally demonstrated
 
 - **The live model** (DeepSeek-R1 8B through llama.cpp): one run of 13 turns, as above. Of the refusals, 4 were invented actions and 1 was a band's tension. None was a prohibition, since the model never proposed a prohibited act. This run never had to fail closed, so the guidance-driven retry was not exercised here. It was in the previous recorded run, where after inventing actions the model chose known ones on its first retry. The model never chose the action that runs a command, so `run` was exercised only by the tests and the scripted path.
+- **The agent process** receives how each candidate would move the bands, which it prints for the reader. The model's prompt never includes them.
 - **The live prompts** give the model the situation's title and, on a retry, the guidance. It does not see its own positions, and the titles were written for the scripted path, so they can describe a state the live chain is not in.
 
 ### Not run
@@ -113,4 +117,23 @@ An outside review of PR #1 found four issues, each fixed in v0.4:
 
 ## Reviews
 
-One independent read-only review of v0.1 reported 1 critical, 5 important and 24 minor findings, and each was addressed. v0.2, which added the fork set, the service, the store, the audit and the pull-back, and v0.3, which adds acts, receipts and the world, have not had an independent review.
+One independent read-only review of v0.1 reported 1 critical, 5 important and 24 minor findings, each addressed. An outside review of v0.3 reported the four issues above, each fixed in v0.4.
+
+A second independent read-only review, of v0.2 to v0.4, found no route for the agent or a socket client to make the enforcer commit something ineligible or act without a committed step. It reported 4 important and 11 minor findings, each addressed in v0.5:
+
+- **The audit took the device key from the store itself, and never checked a receipt's outputs against its step's act.** It now takes the key from you, and requires exactly the act's outputs.
+- **A torn or failed store write could leave the store unloadable, and a failed store write did not halt.** A torn tail is dropped, and any failure to persist halts.
+- **Forks the AI replaced before choosing were thrown away.** They are now stored as signed considered forks and checked from their parents.
+- **The network test could pass with the network allowed.** It now connects by address to its own listener, with an outside control.
+- **Minor:**
+  - The macOS profile allowed more than claimed, and is now tighter and described exactly.
+  - Background children could outlive the time limit.
+  - World files were not synced before their receipts.
+  - The store had no lock.
+  - The store and the world were not owner-only.
+  - A link or special file in the world was followed.
+  - The socket's mode was set after binding.
+  - `verified` was a fixed value.
+  - Some claims were overstated.
+
+v0.5 has not been reviewed since.

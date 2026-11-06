@@ -1,4 +1,4 @@
-//! The AI's side. It holds no key, no charter and no number: it reaches the enforcer only through
+//! The AI's side. It holds no key and no charter: it reaches the enforcer only through
 //! its socket, and can only propose and choose. When everything it proposes is refused, it is
 //! told why in words and asked again, which is how the bands pull it back toward center.
 //!
@@ -313,11 +313,10 @@ fn run() -> Result<(), String> {
 
     println!("DSM ethical autonomy prototype: this enforces the measurements it was given.");
     println!("It does not understand ethics, and passing here does not make an act good.");
-    println!(
-        "The AI's side holds no key, no charter and no number. It reaches the enforcer by socket."
-    );
+    println!("The AI's side holds no key and no charter. It reaches the enforcer by socket.");
+    println!("The model is never shown a measurement; the positions printed here are for you.");
 
-    let (mut committed, mut verified) = (0u32, 0u32);
+    let mut committed = 0u32;
     let mut out_record: Vec<RecordedTurn> = vec![];
     let mut turn = 0u64;
     let attempts = if model.is_some() || recorded.is_some() {
@@ -433,16 +432,12 @@ fn run() -> Result<(), String> {
                         fork_size,
                         tip,
                         decision,
-                        verified: ok,
                         effects,
                         ..
                     } => {
                         committed += 1;
-                        if ok {
-                            verified += 1;
-                        }
                         println!(
-                            "   committed: {action}, with all {fork_size} candidates in the fork\n   tip {tip}\n   decision {decision}\n   verified from its parent alone"
+                            "   committed: {action}, with all {fork_size} candidates in the fork\n   tip {tip}\n   decision {decision}\n   verified from its parent alone by the enforcer"
                         );
                         if effects.is_empty() {
                             println!("   acted: nothing outside the chain");
@@ -464,9 +459,6 @@ fn run() -> Result<(), String> {
     println!();
     print_status(&mut link)?;
     println!("committed steps: {committed}");
-    if verified != committed {
-        return Err("a committed step was not verified".to_string());
-    }
     println!("every committed step verified from its parent");
     if let Some(path) = &record {
         let text = serde_json::to_string_pretty(&out_record).map_err(|e| e.to_string())?;

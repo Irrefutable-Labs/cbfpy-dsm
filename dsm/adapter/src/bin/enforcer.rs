@@ -20,7 +20,6 @@ use ethical_autonomy_adapter::store::ChainStore;
 use ethical_autonomy_adapter::{
     check_receipts, keypair_from_seed, parse_charter_config, Enforcer, SignedCharter,
 };
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -98,8 +97,25 @@ fn run() -> Result<(), String> {
         keypair_from_seed(&read_secret_seed(&args.device_seed).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
 
+    // Nothing the enforcer keeps may sit where a command can read it.
+    std::fs::create_dir_all(&args.world).map_err(|e| e.to_string())?;
+    let world = args.world.canonicalize().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&args.store).map_err(|e| e.to_string())?;
+    let seed = args
+        .device_seed
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", args.device_seed.display()))?;
+    let store_dir = args.store.canonicalize().map_err(|e| e.to_string())?;
+    if seed.starts_with(&world) {
+        return Err("the device seed must not be inside the world".to_string());
+    }
+    if store_dir.starts_with(&world) || world.starts_with(&store_dir) {
+        return Err("the store must not be inside the world, or contain it".to_string());
+    }
     let store = ChainStore::open(&args.store).map_err(|e| e.to_string())?;
+    let _lock = store.lock().map_err(|e| e.to_string())?;
     let (enforcer, steps, receipts) = if store.exists() {
+        store.drop_torn_tail().map_err(|e| e.to_string())?;
         let stored = store.load().map_err(|e| e.to_string())?;
         let e = Enforcer::resume(device, charter, &trusted, &stored.genesis, &stored.steps)
             .map_err(|e| format!("the stored chain was refused: {e}"))?;
@@ -146,9 +162,14 @@ fn run() -> Result<(), String> {
     if args.socket.exists() {
         std::fs::remove_file(&args.socket).map_err(|e| e.to_string())?;
     }
-    let listener = UnixListener::bind(&args.socket).map_err(|e| format!("bind: {e}"))?;
-    std::fs::set_permissions(&args.socket, std::fs::Permissions::from_mode(socket_mode))
-        .map_err(|e| e.to_string())?;
+    // The socket is created with its mode, rather than changed after: nothing can swap the
+    // path for a link in between.
+    // SAFETY: umask only sets this process's file-creation mask, and it is restored at once.
+    let previous = unsafe { libc::umask(0o777 & !socket_mode) };
+    let bound = UnixListener::bind(&args.socket);
+    // SAFETY: as above.
+    unsafe { libc::umask(previous) };
+    let listener = bound.map_err(|e| format!("bind: {e}"))?;
     eprintln!(
         "listening on {} at tip {}",
         args.socket.display(),

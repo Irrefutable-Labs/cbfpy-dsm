@@ -28,8 +28,9 @@ mod verify;
 pub use charter::{keypair_from_seed, Catalog, CatalogRow, Keypair, SignedCharter};
 pub use config::parse_charter_config;
 pub use enforcer::{
-    audit_chain, check_receipts, derive_transition_entropy, identity_of, AdapterError,
-    AttestedState, Audit, Decision, Enforcer, Future, FutureStatus, Proposal, StepRecord, MAX_FORK,
+    audit_chain, check_considered, check_receipts, derive_transition_entropy, identity_of,
+    AdapterError, AttestedState, Audit, Decision, Enforcer, Future, FutureStatus, Proposal,
+    StepRecord, MAX_FORK,
 };
 pub use verify::{verify_genesis, verify_step, Refusal};
 

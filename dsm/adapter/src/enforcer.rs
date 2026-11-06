@@ -334,6 +334,21 @@ impl Enforcer {
         &self.device.public
     }
 
+    /// Sign a fork that is being superseded, at the current parent.
+    pub fn sign_considered(
+        &self,
+        records: Vec<CandidateRecord>,
+    ) -> Result<crate::fork::ConsideredFork, AdapterError> {
+        let mut c = crate::fork::ConsideredFork {
+            parent_tip: self.state.tip,
+            records,
+            signature: vec![],
+        };
+        c.signature = sphincs::sphincs_sign(&self.device.secret, &c.commitment())
+            .map_err(|e| AdapterError::Dsm(e.to_string()))?;
+        Ok(c)
+    }
+
     /// Sign what a committed step did in the world.
     pub fn sign_receipt(
         &self,
@@ -356,9 +371,8 @@ impl Enforcer {
     }
 
     /// Branch every proposal from the current parent, and commit to the set. Nothing here touches
-    /// the chain. Proposals past [`MAX_FORK`] are dropped, so a fork stays bounded.
+    /// the chain. A fork wider than [`MAX_FORK`] can be shown but never committed.
     pub fn fork(&self, proposals: &[Proposal]) -> Vec<Future> {
-        let proposals = &proposals[..proposals.len().min(MAX_FORK)];
         let worked = self.records_for(proposals);
         let records: Vec<CandidateRecord> = worked.iter().map(|(r, _)| r.clone()).collect();
         let root = fork_root(&records);
@@ -533,7 +547,8 @@ pub struct Audit {
     machine: StateMachine,
 }
 
-/// Every receipt must be signed by the device and name the decision of the step it follows.
+/// Every receipt must be signed by the device, name the decision of the step it follows, and
+/// list exactly what that step's act writes.
 /// Returns how many steps have not yet had their act carried out: those after the last receipt.
 pub fn check_receipts(
     device_public: &[u8],
@@ -549,6 +564,12 @@ pub fn check_receipts(
         if receipt.sequence != step.successor.sequence
             || receipt.decision_commit != step.decision_commit
             || !receipt.is_signed_by(device_public)
+            || !crate::act::outputs_fit(
+                step.successor.sequence,
+                &step.row.act,
+                &step.proposal.text,
+                &receipt.outputs,
+            )
         {
             return Err(AdapterError::BadStore(format!(
                 "the receipt for step {} does not match it",
@@ -627,4 +648,53 @@ pub fn audit_chain(
         forks,
         machine,
     })
+}
+
+/// Each considered fork must be signed by the device, name the parent it was put forward at,
+/// and hold exactly what that parent makes of each of its candidates. `considered` pairs each
+/// fork with the number of steps stored before it. Returns how many candidates they hold, and
+/// how many of those were refused, unmeasured or malformed.
+pub fn check_considered(
+    device_public: &[u8],
+    charter: &SignedCharter,
+    genesis: &AttestedState,
+    steps: &[StepRecord],
+    considered: &[(usize, crate::fork::ConsideredFork)],
+) -> Result<(usize, usize), AdapterError> {
+    let (mut candidates, mut refused) = (0, 0);
+    for (n, (after, fork)) in considered.iter().enumerate() {
+        let parent = match after {
+            0 => genesis,
+            k => {
+                &steps
+                    .get(k - 1)
+                    .ok_or_else(|| {
+                        AdapterError::BadStore("a considered fork after no step".to_string())
+                    })?
+                    .successor
+            }
+        };
+        let bad = |why: &str| AdapterError::BadStore(format!("considered fork {}: {why}", n + 1));
+        if fork.records.is_empty() || fork.records.len() > MAX_FORK {
+            return Err(bad("empty or too wide"));
+        }
+        if fork.parent_tip != parent.tip {
+            return Err(bad("not put forward at the parent it is stored after"));
+        }
+        if !fork.is_signed_by(device_public) {
+            return Err(bad("not signed by the device"));
+        }
+        for record in &fork.records {
+            let (worked, _) =
+                record_candidate(charter, &parent.tip, &parent.positions, &record.proposal);
+            if worked != *record {
+                return Err(bad("a candidate is not what its parent makes of it"));
+            }
+            candidates += 1;
+            if record.outcome != Outcome::Eligible {
+                refused += 1;
+            }
+        }
+    }
+    Ok((candidates, refused))
 }

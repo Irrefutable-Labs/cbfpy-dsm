@@ -26,6 +26,12 @@ impl Place {
         let seed = dir.join("seed");
         std::fs::write(&seed, "d1".repeat(32)).expect("seed");
         std::fs::set_permissions(&seed, std::fs::Permissions::from_mode(0o600)).expect("mode");
+        let device = ethical_autonomy_adapter::keypair_from_seed(&[0xd1; 32]).expect("key");
+        std::fs::write(
+            dir.join("device.pub"),
+            ethical_autonomy_adapter::hexser::to_hex(&device.public),
+        )
+        .expect("device key");
         Place { dir }
     }
 
@@ -87,6 +93,10 @@ impl Place {
     }
 
     fn audit(&self) -> Output {
+        self.audit_with(&self.dir.join("device.pub"))
+    }
+
+    fn audit_with(&self, device: &Path) -> Output {
         Command::new(env!("CARGO_BIN_EXE_ethical-audit"))
             .current_dir(root())
             .args([
@@ -98,6 +108,8 @@ impl Place {
                 "scenarios/charter.sig",
                 "--authority",
                 "scenarios/authority.pub",
+                "--device",
+                device.to_str().expect("path"),
                 "--world",
                 self.world().to_str().expect("path"),
             ])
@@ -148,7 +160,8 @@ fn the_scripted_run_shows_every_mechanism() {
         "NO ELIGIBLE FUTURE",
         "a safe alternative is required",
         "enforces the measurements it was given",
-        "holds no key, no charter and no number",
+        "holds no key and no charter",
+        "never shown a measurement",
         "with all 4 candidates in the fork",
     ] {
         assert!(out.contains(expected), "missing: {expected}\n{out}");
@@ -625,5 +638,105 @@ fn no_authority_seed_ships_with_the_source() {
             ethical_autonomy_adapter::hexser::to_hex(&k.public),
             public.trim()
         );
+    }
+}
+
+#[test]
+fn the_audit_trusts_only_the_device_key_it_is_given() {
+    let place = Place::new("device-key");
+    let first = place.start();
+    scripted(&place);
+    drop(first);
+    let other = ethical_autonomy_adapter::keypair_from_seed(&[0x77; 32]).expect("key");
+    let path = place.dir.join("other.pub");
+    std::fs::write(
+        &path,
+        ethical_autonomy_adapter::hexser::to_hex(&other.public),
+    )
+    .expect("write");
+    let audit = place.audit_with(&path);
+    assert!(!audit.status.success());
+    assert!(
+        text(&audit).contains("different device key"),
+        "{}",
+        text(&audit)
+    );
+}
+
+#[test]
+fn a_second_enforcer_cannot_open_a_store_in_use() {
+    let place = Place::new("locked");
+    let _first = place.start();
+    let second = place
+        .enforcer(Path::new("scenarios/charter.json"))
+        .args(["--socket", place.dir.join("s2").to_str().unwrap()])
+        .output()
+        .expect("run");
+    assert!(!second.status.success());
+    assert!(
+        text(&second).contains("another enforcer holds this store"),
+        "{}",
+        text(&second)
+    );
+}
+
+/// A line cut short by a stop mid-write was never installed. The enforcer drops it and carries
+/// on, and the audit agrees with the chain as it was.
+#[test]
+fn a_torn_last_line_is_dropped_and_the_chain_resumes() {
+    let place = Place::new("torn");
+    let first = place.start();
+    scripted(&place);
+    let before = place.agent(&["--status"]);
+    drop(first);
+    let chain = place.store().join("chain.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&chain)
+        .expect("open");
+    file.write_all(b"{\"step\":{\"parent_tip\":\"00")
+        .expect("tear");
+    drop(file);
+
+    let audit = place.audit();
+    assert!(audit.status.success(), "{}", text(&audit));
+    let _second = place.start();
+    let after = place.agent(&["--status"]);
+    assert_eq!(before.stdout, after.stdout);
+    let more = place.agent(&["--situations", "scenarios/situations.json"]);
+    assert!(more.status.success(), "{}", text(&more));
+    let audit = place.audit();
+    assert!(audit.status.success(), "{}", text(&audit));
+}
+
+#[test]
+fn the_seed_and_the_store_must_not_sit_inside_the_world() {
+    let place = Place::new("inside");
+    std::fs::create_dir_all(place.world()).expect("world");
+    let seed = place.world().join("seed");
+    std::fs::copy(place.dir.join("seed"), &seed).expect("copy");
+    std::fs::set_permissions(&seed, std::fs::Permissions::from_mode(0o600)).expect("mode");
+    let out = place
+        .enforcer(Path::new("scenarios/charter.json"))
+        .args(["--device-seed", seed.to_str().unwrap()])
+        .output()
+        .expect("run");
+    assert!(!out.status.success());
+    assert!(
+        text(&out).contains("must not be inside the world"),
+        "{}",
+        text(&out)
+    );
+}
+
+#[test]
+fn the_store_and_the_world_are_owner_only() {
+    let place = Place::new("modes");
+    let first = place.start();
+    scripted(&place);
+    drop(first);
+    for dir in [place.store(), place.world()] {
+        let mode = std::fs::metadata(&dir).expect("dir").permissions().mode();
+        assert_eq!(mode & 0o077, 0, "{} mode {:o}", dir.display(), mode & 0o777);
     }
 }

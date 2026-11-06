@@ -113,3 +113,32 @@ pub fn fork_root(records: &[CandidateRecord]) -> Hash {
     let leaves: Vec<Hash> = records.iter().map(CandidateRecord::leaf).collect();
     commit::fork_root(&leaves)
 }
+
+/// A fork the AI put forward and then replaced with another before choosing, kept under the
+/// device key so the chain holds everything it considered, not only what it chose.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConsideredFork {
+    #[serde(with = "crate::hexser::array")]
+    pub parent_tip: Hash,
+    pub records: Vec<CandidateRecord>,
+    #[serde(with = "crate::hexser::bytes")]
+    pub signature: Vec<u8>,
+}
+
+impl ConsideredFork {
+    pub fn commitment(&self) -> Hash {
+        commit::considered_commit(&self.parent_tip, &fork_root(&self.records))
+    }
+
+    pub fn is_signed_by(&self, device_public: &[u8]) -> bool {
+        matches!(
+            dsm::crypto::sphincs::sphincs_verify(
+                device_public,
+                &self.commitment(),
+                &self.signature
+            ),
+            Ok(true)
+        )
+    }
+}

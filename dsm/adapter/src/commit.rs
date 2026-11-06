@@ -24,6 +24,8 @@ const EVIDENCE: TaggedHashDomain<'static> =
 const RECEIPT: TaggedHashDomain<'static> = dsm::tagged_domain!(b"DSM/ethical-autonomy/receipt/v0");
 const WORLD_FILE: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/world-file/v0");
+const CONSIDERED: TaggedHashDomain<'static> =
+    dsm::tagged_domain!(b"DSM/ethical-autonomy/considered/v0");
 const CANDIDATE: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/candidate/v0");
 const FORK: TaggedHashDomain<'static> = dsm::tagged_domain!(b"DSM/ethical-autonomy/fork/v0");
@@ -214,4 +216,9 @@ pub fn fork_root(leaves: &[Hash]) -> Hash {
     let tree = dsm::merkle::tree::MerkleTree::new(leaves.iter().map(|l| l.to_vec()).collect());
     let root = tree.root_hash().unwrap_or([0; 32]);
     domain_hash_bytes(FORK, &frame(&[&(leaves.len() as u64).to_be_bytes(), &root]))
+}
+
+/// A fork that was put forward and then superseded, before any step committed from its parent.
+pub fn considered_commit(parent_tip: &Hash, fork_root: &Hash) -> Hash {
+    domain_hash_bytes(CONSIDERED, &frame(&[parent_tip, fork_root]))
 }

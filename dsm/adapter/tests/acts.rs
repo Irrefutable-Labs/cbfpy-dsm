@@ -12,8 +12,8 @@ use ethical_autonomy_adapter::protocol::{Request, Response};
 use ethical_autonomy_adapter::server::Service;
 use ethical_autonomy_adapter::store::ChainStore;
 use ethical_autonomy_adapter::{
-    check_receipts, verify_step, AdapterError, Catalog, Enforcer, FutureStatus, Proposal, Refusal,
-    SignedCharter,
+    check_considered, check_receipts, verify_step, AdapterError, Catalog, Enforcer, FutureStatus,
+    Proposal, Refusal, SignedCharter,
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -165,6 +165,28 @@ fn a_command_runs_with_an_empty_environment_inside_the_world() {
 }
 
 #[test]
+fn the_time_limit_stops_the_processes_a_command_starts_too() {
+    let world = place("children");
+    let started = std::time::Instant::now();
+    let out = run_command(
+        &world,
+        &[
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "/bin/sleep 30 & /bin/sleep 30".to_string(),
+        ],
+        Duration::from_millis(300),
+    )
+    .expect("run");
+    assert!(String::from_utf8_lossy(&out).contains("stopped after the time limit"));
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "a background child held the enforcer for {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn a_command_that_runs_too_long_is_stopped() {
     let world = place("slow");
     let out = run_command(
@@ -269,8 +291,11 @@ fn a_receipt_is_signed_and_tied_to_its_step() {
     let mut e = acting_enforcer();
     let a = commit_text(&mut e, "explore_a_little", "one");
     let b = commit_text(&mut e, "explore_a_little", "two");
-    let ra = e.sign_receipt(&a, vec![]).expect("receipt");
-    let rb = e.sign_receipt(&b, vec![]).expect("receipt");
+    let world = place("tied");
+    let oa = perform(&world, 1, &a.row.act, &a.proposal.text).expect("perform");
+    let ob = perform(&world, 2, &b.row.act, &b.proposal.text).expect("perform");
+    let ra = e.sign_receipt(&a, oa).expect("receipt");
+    let rb = e.sign_receipt(&b, ob).expect("receipt");
     let steps = [a, b];
     assert_eq!(
         check_receipts(&keys().device.public, &steps, &[ra.clone(), rb.clone()]).expect("ok"),
@@ -372,6 +397,8 @@ fn a_command_cannot_write_even_inside_the_world() {
     let out = run(&world, &["/usr/bin/touch", "made.txt"]);
     assert!(!out.contains("[exit 0]"), "{out}");
     assert!(!world.join("made.txt").exists());
+    // Outside the world: on Linux that path does not exist inside the sandbox at all, so this
+    // half adds only to the macOS run.
     let outside = place("write-outside");
     run(
         &world,
@@ -380,28 +407,48 @@ fn a_command_cannot_write_even_inside_the_world() {
     assert!(!outside.join("made.txt").exists());
 }
 
+/// The test opens a listener on this machine and has the command connect to it by address, so
+/// neither name resolution nor TLS can make it fail. The same connection made outside the
+/// sandbox must arrive, or the test proves nothing.
 #[test]
 fn a_command_has_no_network() {
+    use std::net::TcpListener;
     let world = place("network");
-    if !Path::new("/usr/bin/curl").exists() {
-        return;
-    }
-    let out = run(
-        &world,
-        &[
-            "/usr/bin/curl",
-            "-s",
-            "-m",
-            "5",
-            "-o",
-            "/dev/null",
-            "-w",
-            "%{http_code}",
-            "https://github.com",
-        ],
+    assert!(Path::new("/usr/bin/curl").exists(), "this test needs curl");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listen");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let url = format!(
+        "http://127.0.0.1:{}/",
+        listener.local_addr().expect("addr").port()
     );
-    assert!(!out.contains("200") && !out.contains("301"), "{out}");
-    assert!(!out.contains("[exit 0]"), "{out}");
+    let arrived = |l: &TcpListener| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if l.accept().is_ok() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    };
+
+    let control = std::process::Command::new("/usr/bin/curl")
+        .args(["-s", "-m", "1", &url])
+        .spawn()
+        .expect("curl");
+    assert!(
+        arrived(&listener),
+        "an unconfined connection must arrive, or the test is blind"
+    );
+    let mut control = control;
+    let _ = control.kill();
+    let _ = control.wait();
+
+    let out = run(&world, &["/usr/bin/curl", "-s", "-m", "1", &url]);
+    assert!(
+        !arrived(&listener),
+        "a connection arrived from inside the sandbox: {out}"
+    );
 }
 
 #[test]
@@ -527,4 +574,188 @@ fn a_failed_act_halts_commits_until_a_restart_finishes_it() {
 #[test]
 fn the_sandbox_starts_on_this_system() {
     confinement_works(&place("probe")).expect("the command sandbox must start here");
+}
+
+#[test]
+fn a_link_or_special_file_in_the_world_fails_the_check() {
+    let world = place("links");
+    std::fs::create_dir_all(world.join("files")).expect("dir");
+    std::os::unix::fs::symlink("/etc", world.join("files/etc")).expect("link");
+    assert!(check_world(&world, &[]).is_err());
+}
+
+#[test]
+fn a_receipt_must_list_exactly_what_its_act_writes() {
+    let mut e = acting_enforcer();
+    let step = commit_text(&mut e, "explore_a_little", "a note");
+    let honest = perform(&place("fit"), 1, &step.row.act, &step.proposal.text).expect("perform");
+    let good = e.sign_receipt(&step, honest.clone()).expect("receipt");
+    assert_eq!(
+        check_receipts(
+            &keys().device.public,
+            std::slice::from_ref(&step),
+            std::slice::from_ref(&good)
+        )
+        .expect("ok"),
+        0
+    );
+    let lies = [
+        vec![],
+        vec![ethical_autonomy_adapter::act::Output {
+            path: "files/interlock.txt".to_string(),
+            hash: honest[0].hash,
+        }],
+        vec![ethical_autonomy_adapter::act::Output {
+            path: honest[0].path.clone(),
+            hash: [7; 32],
+        }],
+        [honest.clone(), honest.clone()].concat(),
+    ];
+    for outputs in lies {
+        let signed = e.sign_receipt(&step, outputs.clone()).expect("receipt");
+        assert!(
+            check_receipts(
+                &keys().device.public,
+                std::slice::from_ref(&step),
+                &[signed]
+            )
+            .is_err(),
+            "{outputs:?}"
+        );
+    }
+}
+
+#[test]
+fn the_service_sweeps_temporary_files_when_it_starts() {
+    let dir = place("start-sweep");
+    let world = dir.join("world");
+    std::fs::create_dir_all(world.join("journal")).expect("dir");
+    std::fs::write(world.join("journal/.9.partial"), "half").expect("partial");
+    let store = ChainStore::open(&dir.join("store")).expect("store");
+    let e = acting_enforcer();
+    store.begin(&e.state(), e.device_public()).expect("begin");
+    Service::start(
+        e,
+        store,
+        world.clone(),
+        keys().authority.public.clone(),
+        &[],
+        0,
+    )
+    .expect("start");
+    assert!(!world.join("journal/.9.partial").exists());
+}
+
+/// A step that cannot be stored halts the enforcer just as a failed act does.
+#[test]
+fn a_failed_store_write_halts_commits() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = place("store-fail");
+    let world = dir.join("world");
+    let store = ChainStore::open(&dir.join("store")).expect("store");
+    let e = acting_enforcer();
+    store.begin(&e.state(), e.device_public()).expect("begin");
+    let mut service =
+        Service::start(e, store, world, keys().authority.public.clone(), &[], 0).expect("start");
+    let chain = dir.join("store/chain.jsonl");
+    std::fs::set_permissions(&chain, std::fs::Permissions::from_mode(0o400)).expect("read-only");
+    let root = forked(service.handle(Request::Propose {
+        proposals: vec![said("add_precautions", "please review")],
+    }));
+    let failed = service.handle(Request::Choose {
+        fork_root: root,
+        index: 0,
+    });
+    std::fs::set_permissions(&chain, std::fs::Permissions::from_mode(0o600)).expect("restore");
+    assert!(
+        matches!(&failed, Response::Error { message } if message.contains("could not be stored")),
+        "{failed:?}"
+    );
+    let refused = service.handle(Request::Propose {
+        proposals: vec![said("add_precautions", "again")],
+    });
+    assert!(
+        matches!(&refused, Response::Refused { reason } if reason.starts_with("halted")),
+        "{refused:?}"
+    );
+}
+
+/// A fork put forward and then replaced is not lost: it is stored, signed, as considered, and
+/// checked from its own parent like any committed fork.
+#[test]
+fn a_superseded_fork_is_stored_and_checked() {
+    let dir = place("all-forks");
+    let world = dir.join("world");
+    let store = ChainStore::open(&dir.join("store")).expect("store");
+    let e = acting_enforcer();
+    let genesis = e.state();
+    store.begin(&e.state(), e.device_public()).expect("begin");
+    let mut service =
+        Service::start(e, store, world, keys().authority.public.clone(), &[], 0).expect("start");
+    forked(service.handle(Request::Propose {
+        proposals: vec![said("cause_harm", ""), said("overreach", "")],
+    }));
+    let root = forked(service.handle(Request::Propose {
+        proposals: vec![said("hold", "")],
+    }));
+    let committed = service.handle(Request::Choose {
+        fork_root: root,
+        index: 0,
+    });
+    assert!(
+        matches!(committed, Response::Committed { .. }),
+        "{committed:?}"
+    );
+
+    let stored = ChainStore::open(&dir.join("store"))
+        .expect("store")
+        .load()
+        .expect("load");
+    assert_eq!(stored.considered.len(), 1);
+    let (after, fork) = &stored.considered[0];
+    assert_eq!(*after, 0);
+    let actions: Vec<&str> = fork
+        .records
+        .iter()
+        .map(|r| r.proposal.action.as_str())
+        .collect();
+    assert_eq!(actions, vec!["cause_harm", "overreach"]);
+    let check = |c: &[(usize, ethical_autonomy_adapter::fork::ConsideredFork)]| {
+        check_considered(
+            &keys().device.public,
+            &acting_charter(),
+            &genesis,
+            &stored.steps,
+            c,
+        )
+    };
+    assert_eq!(check(&stored.considered).expect("ok"), (2, 2));
+    let mut tampered = stored.considered.clone();
+    tampered[0].1.records[0].outcome = Outcome::Eligible;
+    assert!(check(&tampered).is_err(), "an outcome changed");
+    let mut moved = stored.considered.clone();
+    moved[0].0 = 1;
+    assert!(check(&moved).is_err(), "moved to another parent");
+}
+
+#[test]
+fn no_more_than_the_limit_can_be_put_forward_at_one_step() {
+    let dir = place("limit");
+    let store = ChainStore::open(&dir.join("store")).expect("store");
+    let e = acting_enforcer();
+    store.begin(&e.state(), e.device_public()).expect("begin");
+    let mut service = Service::start(
+        e,
+        store,
+        dir.join("world"),
+        keys().authority.public.clone(),
+        &[],
+        0,
+    )
+    .expect("start");
+    let many: Vec<Proposal> = (0..=ethical_autonomy_adapter::MAX_FORK)
+        .map(|_| said("hold", ""))
+        .collect();
+    let refused = service.handle(Request::Propose { proposals: many });
+    assert!(matches!(refused, Response::Refused { .. }), "{refused:?}");
 }

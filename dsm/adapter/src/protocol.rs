@@ -59,13 +59,13 @@ pub enum Response {
         fired_rules: Vec<u32>,
         futures: Vec<FutureReport>,
     },
+    /// Committed: the enforcer has verified the step from its parent and stored it.
     Committed {
         sequence: u64,
         action: String,
         fork_size: usize,
         tip: String,
         decision: String,
-        verified: bool,
         /// What the act wrote in the world, by path.
         effects: Vec<String>,
     },

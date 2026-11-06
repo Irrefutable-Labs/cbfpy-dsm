@@ -1,5 +1,6 @@
 //! What the AI's side is told about its futures: verdicts, reasons and plain-language guidance,
-//! with positions for display. It is never told a measurement.
+//! with positions for display. The positions show how a candidate would move each band, so the
+//! agent process can work out a measurement from them. The model's prompt never includes them.
 
 use crate::enforcer::{Future, FutureStatus};
 use crate::fork::Outcome;

@@ -3,7 +3,7 @@
 //! eligible. Only a committed step acts on the world, and only through `act::perform`.
 
 use crate::act::{perform, sweep_partial, EffectReceipt};
-use crate::enforcer::{AdapterError, Enforcer, Future, FutureStatus, StepRecord};
+use crate::enforcer::{AdapterError, Enforcer, Future, FutureStatus, StepRecord, MAX_FORK};
 use crate::hexser::{decode, to_hex};
 use crate::protocol::{receive, send, MenuItem, Position, Request, Response};
 use crate::report::report;
@@ -18,7 +18,8 @@ pub struct Service {
     store: ChainStore,
     world: PathBuf,
     trusted_authority: Vec<u8>,
-    /// The fork most recently proposed. Any commit closes it.
+    /// The fork most recently put forward. If another replaces it before a choice, it is
+    /// signed and stored as considered, so nothing the AI put forward is lost.
     open: Option<Vec<Future>>,
     /// Set when a committed step's act failed. Nothing more commits until a restart finishes
     /// it, so receipts can never fall out of order.
@@ -40,6 +41,8 @@ impl Service {
         receipts: usize,
     ) -> Result<Self, AdapterError> {
         std::fs::create_dir_all(&world).map_err(|e| AdapterError::Effect(e.to_string()))?;
+        std::fs::set_permissions(&world, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .map_err(|e| AdapterError::Effect(e.to_string()))?;
         let swept = sweep_partial(&world)?;
         if swept > 0 {
             eprintln!("removed {swept} temporary files an interrupted act left behind");
@@ -143,6 +146,26 @@ impl Service {
                         reason: "nothing was proposed".to_string(),
                     };
                 }
+                if proposals.len() > MAX_FORK {
+                    return Response::Refused {
+                        reason: format!(
+                            "no more than {MAX_FORK} candidates may be put forward at once"
+                        ),
+                    };
+                }
+                if let Some(previous) = self.open.take() {
+                    let kept = self
+                        .enforcer
+                        .sign_considered(previous[0].fork.clone())
+                        .and_then(|c| self.store.append_considered(&c));
+                    if let Err(e) = kept {
+                        let why = format!("a superseded fork could not be stored: {e}");
+                        self.halted = Some(why.clone());
+                        return Response::Error {
+                            message: format!("{why}. Nothing more commits until a restart"),
+                        };
+                    }
+                }
                 let futures = self.enforcer.fork(&proposals);
                 let fired_rules = futures
                     .iter()
@@ -166,7 +189,7 @@ impl Service {
     }
 
     fn choose(&mut self, fork_root: &str, index: usize) -> Response {
-        let Some(futures) = self.open.take() else {
+        let Some(futures) = self.open.clone() else {
             return Response::Refused {
                 reason: "no fork is open".to_string(),
             };
@@ -176,7 +199,6 @@ impl Service {
             .get(index)
             .filter(|f| Some(f.fork_root.to_vec()) == root)
         else {
-            self.open = Some(futures);
             return Response::Refused {
                 reason: "no such candidate in the open fork".to_string(),
             };
@@ -195,17 +217,21 @@ impl Service {
         let step = match result {
             Ok(step) => step,
             Err(AdapterError::NotEligible) => {
-                self.open = Some(futures);
                 return Response::Refused {
                     reason: "that candidate is not eligible".to_string(),
                 };
             }
             Err(e) => {
+                // The step may or may not be on disk. Nothing more commits until a restart
+                // reads the store and settles which.
+                let why = format!("a step could not be stored: {e}");
+                self.halted = Some(why.clone());
                 return Response::Error {
-                    message: e.to_string(),
-                }
+                    message: format!("{why}. Nothing more commits until a restart"),
+                };
             }
         };
+        self.open = None;
         // Only now, with the step committed and stored, does anything happen in the world.
         match self.act(&step) {
             Ok(receipt) => Response::Committed {
@@ -214,7 +240,6 @@ impl Service {
                 fork_size: step.fork.len(),
                 tip: to_hex(&step.successor.tip),
                 decision: to_hex(&step.decision_commit),
-                verified: true,
                 effects: receipt.outputs.iter().map(|o| o.path.clone()).collect(),
             },
             Err(e) => {
