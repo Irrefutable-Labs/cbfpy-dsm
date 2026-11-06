@@ -153,7 +153,15 @@ fn a_command_runs_with_an_empty_environment_inside_the_world() {
         Duration::from_secs(10),
     )
     .expect("env");
-    assert_eq!(String::from_utf8_lossy(&env).trim(), "[exit 0]");
+    // Nothing is inherited. bubblewrap's --clearenv keeps only PWD, the working directory.
+    let env = String::from_utf8_lossy(&env).to_string();
+    let inherited: Vec<&str> = env
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with("[exit") && !l.starts_with("PWD="))
+        .collect();
+    assert!(inherited.is_empty(), "inherited: {inherited:?}");
+    assert!(env.contains("[exit 0]"), "{env}");
+    assert!(!env.contains("HOME=") && !env.contains("TOKEN"), "{env}");
 }
 
 #[test]
