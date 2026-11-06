@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Entry {
-    Genesis(AttestedState),
+    Genesis(Box<AttestedState>),
     Step(Box<StepRecord>),
 }
 
@@ -58,7 +58,7 @@ impl ChainStore {
             .create_new(true)
             .open(self.chain())
             .map_err(io)?;
-        Self::write_line(&mut file, &Entry::Genesis(genesis.clone()))?;
+        Self::write_line(&mut file, &Entry::Genesis(Box::new(genesis.clone())))?;
         std::fs::write(self.device(), crate::hexser::to_hex(device_public)).map_err(io)
     }
 
@@ -84,7 +84,7 @@ impl ChainStore {
             let entry: Entry = serde_json::from_str(&line)
                 .map_err(|e| AdapterError::BadStore(format!("line {}: {e}", n + 1)))?;
             match (entry, n) {
-                (Entry::Genesis(g), 0) => genesis = Some(g),
+                (Entry::Genesis(g), 0) => genesis = Some(*g),
                 (Entry::Step(s), n) if n > 0 => steps.push(*s),
                 _ => {
                     return Err(AdapterError::BadStore(format!(

@@ -7,7 +7,7 @@ fn encode(bytes: &[u8]) -> String {
 }
 
 pub fn decode(text: &str) -> Result<Vec<u8>, String> {
-    if text.len() % 2 != 0 || !text.is_ascii() {
+    if !text.len().is_multiple_of(2) || !text.is_ascii() {
         return Err("not hexadecimal".to_string());
     }
     (0..text.len() / 2)

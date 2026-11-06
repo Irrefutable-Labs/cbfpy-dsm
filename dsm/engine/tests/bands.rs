@@ -661,7 +661,8 @@ fn canonical_bytes_cannot_be_confused_by_moving_a_boundary_between_tags() {
 
 #[test]
 fn validation_refuses_a_policy_that_cannot_keep_its_promises() {
-    let cases: Vec<(&str, Box<dyn Fn(&mut Band)>)> = vec![
+    type Change = Box<dyn Fn(&mut Band)>;
+    let cases: Vec<(&str, Change)> = vec![
         (
             "hard below limit",
             Box::new(|b| b.hard_pos = b.limit_pos - 1),
