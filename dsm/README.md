@@ -161,6 +161,23 @@ sandbox-exec -p "(version 1)(allow default)(deny network-outbound (remote ip))(d
 
 `.github/workflows/dsm-ethical-autonomy.yml` runs the Rust tests, formatting and Clippy, the CBFpy cross-check and the Lean proofs on every push and pull request.
 
+## Nothing may be hidden
+
+Any action that affects the world must come with a **declaration**: what the AI intends, the information it relied on, everyone and everything it affects, all it will do, and every material consequence the charter names for that action. The enforcer checks the declaration against its own description of the action, worked out from the signed charter, never against the AI's word.
+
+A candidate fails as **undisclosed**, and cannot commit, if any of these holds:
+
+- it declares nothing;
+- it gives no purpose or reasons;
+- it names no information, or a source the enforcer cannot identify;
+- it leaves out an effect, or claims one it would not have;
+- it leaves out anyone it affects;
+- it leaves out a material consequence.
+
+The declaration is bound into the fork with everything else, so it cannot change afterwards, and it stays on the chain for the people who oversee the AI. The console shows it beside every candidate.
+
+This enforces that the AI declares, and that what it declares matches what the action does. It does not establish that the purpose it states is its real one.
+
 ## Watching it
 
 `ethical-console` serves a live page on `127.0.0.1` only. It reads the store, the world, the charter and the public keys, holds no key and changes nothing, and works every verdict out again whenever the chain changes. Start it beside the enforcer:

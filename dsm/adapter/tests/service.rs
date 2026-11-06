@@ -162,7 +162,10 @@ fn the_scripted_run_shows_every_mechanism() {
         "enforces the measurements it was given",
         "holds no key and no charter",
         "never shown a measurement",
-        "with all 4 candidates in the fork",
+        "with all 5 candidates in the fork",
+        "it does not disclose that it affects person",
+        "it does not disclose a material consequence: risk_accepted",
+        "declares its purpose",
     ] {
         assert!(out.contains(expected), "missing: {expected}\n{out}");
     }
@@ -346,7 +349,7 @@ fn a_client_cannot_choose_a_refused_candidate_or_one_from_a_closed_fork() {
         answer
     };
     let forked = ask(
-        r#"{"request":"propose","proposals":[{"action":"disable_safety_interlock","rationale":"faster"},{"action":"answer_directly","rationale":"plain","text":"Switch off the breaker first."}]}"#,
+        r#"{"request":"propose","proposals":[{"action":"disable_safety_interlock","rationale":"faster"},{"action":"answer_directly","rationale":"plain","text":"Switch off the breaker first.","declaration":{"purpose":"Answer safely.","information":["situation"],"affected":["person"],"effects":["reply"],"consequences":[]}}]}"#,
     );
     let root: String = forked
         .split("\"fork_root\":\"")

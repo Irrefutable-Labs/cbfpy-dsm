@@ -100,12 +100,23 @@ pub fn successor_commit(sequence: u64, positions: &[i64], policy: &Hash, catalog
     )
 }
 
-/// A proposal, with the text it carries for its act. The text is bound, so it cannot change
-/// between the fork and the act.
-pub fn proposal_commit(action: &str, rationale: &str, text: &str) -> Hash {
+/// A proposal: its action, reasons, the text it carries for its act and its declaration. All of
+/// it is bound, so none of it can change between the fork and the act.
+pub fn proposal_commit(p: &crate::enforcer::Proposal) -> Hash {
+    let declaration = p
+        .declaration
+        .as_ref()
+        .map(crate::disclosure::Declaration::canonical_bytes)
+        .unwrap_or_default();
     domain_hash_bytes(
         PROPOSAL,
-        &frame(&[action.as_bytes(), rationale.as_bytes(), text.as_bytes()]),
+        &frame(&[
+            p.action.as_bytes(),
+            p.rationale.as_bytes(),
+            p.text.as_bytes(),
+            &[u8::from(p.declaration.is_some())],
+            &declaration,
+        ]),
     )
 }
 

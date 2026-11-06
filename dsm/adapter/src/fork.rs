@@ -18,6 +18,8 @@ pub enum Outcome {
     Unmeasured,
     /// In the catalog, but its text is missing, too long or unprintable for its act.
     Malformed,
+    /// It would affect the world without disclosing what it is: see [`crate::disclosure`].
+    Undisclosed,
 }
 
 /// One branch of a fork, as committed.
@@ -45,17 +47,14 @@ impl CandidateRecord {
             Outcome::Refused => 2,
             Outcome::Unmeasured => 3,
             Outcome::Malformed => 4,
+            Outcome::Undisclosed => 5,
         }];
         let evaluation = self
             .evaluation_commit
             .map(|h| h.to_vec())
             .unwrap_or_default();
         commit::frame(&[
-            &commit::proposal_commit(
-                &self.proposal.action,
-                &self.proposal.rationale,
-                &self.proposal.text,
-            ),
+            &commit::proposal_commit(&self.proposal),
             &[u8::from(self.row.is_some())],
             &row,
             &self.branch,
@@ -82,7 +81,7 @@ pub fn record_candidate(
     let branch = commit::branch_commitment(
         parent_tip,
         &policy,
-        &commit::proposal_commit(&proposal.action, &proposal.rationale, &proposal.text),
+        &commit::proposal_commit(proposal),
         row.as_ref(),
     );
     let evaluation = row
@@ -91,9 +90,18 @@ pub fn record_candidate(
     let fits = row
         .as_ref()
         .is_some_and(|r| r.act.accepts_text(&proposal.text));
+    let hidden = row.as_ref().map_or(vec![], |r| {
+        crate::disclosure::concealments(
+            &r.act,
+            &r.material,
+            &proposal.rationale,
+            proposal.declaration.as_ref(),
+        )
+    });
     let outcome = match &evaluation {
         None => Outcome::Unmeasured,
         Some(_) if !fits => Outcome::Malformed,
+        Some(_) if !hidden.is_empty() => Outcome::Undisclosed,
         Some(e) if e.is_eligible() => Outcome::Eligible,
         Some(_) => Outcome::Refused,
     };

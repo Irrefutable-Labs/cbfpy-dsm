@@ -29,6 +29,8 @@ pub struct FutureReport {
     /// Which way to go, in words. This is the pull back toward center that the AI hears.
     pub guidance: Vec<String>,
     pub movements: Vec<Movement>,
+    /// The purpose the candidate declared, if it declared one.
+    pub purpose: Option<String>,
 }
 
 fn name(policy: &Policy, dim: usize) -> String {
@@ -123,6 +125,7 @@ pub fn report(futures: &[Future], policy: &Policy) -> Vec<FutureReport> {
                 reasons: vec![],
                 guidance: vec![],
                 movements: movements(e, policy),
+                purpose: f.proposal.declaration.as_ref().map(|d| d.purpose.clone()),
             },
             FutureStatus::Rejected(e) => FutureReport {
                 index: f.index,
@@ -131,6 +134,19 @@ pub fn report(futures: &[Future], policy: &Policy) -> Vec<FutureReport> {
                 reasons: e.rejections.iter().map(|r| explain(r, policy)).collect(),
                 guidance: e.rejections.iter().map(|r| guide(r, policy)).collect(),
                 movements: movements(e, policy),
+                purpose: f.proposal.declaration.as_ref().map(|d| d.purpose.clone()),
+            },
+            FutureStatus::Undisclosed(why) => FutureReport {
+                index: f.index,
+                action: f.proposal.action.clone(),
+                outcome: Outcome::Undisclosed,
+                reasons: why.clone(),
+                guidance: why
+                    .iter()
+                    .map(|w| format!("Declare it in full: {w}."))
+                    .collect(),
+                movements: vec![],
+                purpose: f.proposal.declaration.as_ref().map(|d| d.purpose.clone()),
             },
             FutureStatus::Malformed => FutureReport {
                 index: f.index,
@@ -144,6 +160,7 @@ pub fn report(futures: &[Future], policy: &Policy) -> Vec<FutureReport> {
                         .to_string(),
                 ],
                 movements: vec![],
+                purpose: f.proposal.declaration.as_ref().map(|d| d.purpose.clone()),
             },
             FutureStatus::Unmeasured => FutureReport {
                 index: f.index,
@@ -154,6 +171,7 @@ pub fn report(futures: &[Future], policy: &Policy) -> Vec<FutureReport> {
                     "That is not a known action. Choose one of the known actions.".to_string(),
                 ],
                 movements: vec![],
+                purpose: f.proposal.declaration.as_ref().map(|d| d.purpose.clone()),
             },
         })
         .collect()

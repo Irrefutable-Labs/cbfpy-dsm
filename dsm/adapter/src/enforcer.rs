@@ -51,6 +51,10 @@ pub struct Proposal {
     /// The text the action's act carries, when it carries any. Bound into the fork.
     #[serde(default)]
     pub text: String,
+    /// What the AI discloses about this action. Required for any action with an effect outside
+    /// the chain: see [`crate::disclosure`].
+    #[serde(default)]
+    pub declaration: Option<crate::disclosure::Declaration>,
 }
 
 impl Proposal {
@@ -66,6 +70,10 @@ impl Proposal {
             || self.action.len() > MAX_ACTION_BYTES
             || self.rationale.len() > MAX_RATIONALE_BYTES
             || self.text.len() > crate::act::MAX_TEXT
+            || self
+                .declaration
+                .as_ref()
+                .is_some_and(|d| !d.within_bounds())
         {
             return Err(AdapterError::Config("proposal out of bounds".to_string()));
         }
@@ -81,6 +89,8 @@ pub enum FutureStatus {
     Unmeasured,
     /// Its text does not fit its act.
     Malformed,
+    /// It does not disclose what it is: the reasons why.
+    Undisclosed(Vec<String>),
 }
 
 /// One pre-commit branch from the parent, carrying the whole fork it belongs to. It is a claim
@@ -387,6 +397,20 @@ impl Enforcer {
                 status: match (record.outcome, evaluation) {
                     (Outcome::Eligible, Some(e)) => FutureStatus::Eligible(e),
                     (Outcome::Malformed, _) => FutureStatus::Malformed,
+                    (Outcome::Undisclosed, _) => FutureStatus::Undisclosed(
+                        record
+                            .row
+                            .as_ref()
+                            .map(|r| {
+                                crate::disclosure::concealments(
+                                    &r.act,
+                                    &r.material,
+                                    &record.proposal.rationale,
+                                    record.proposal.declaration.as_ref(),
+                                )
+                            })
+                            .unwrap_or_default(),
+                    ),
                     (_, Some(e)) => FutureStatus::Rejected(e),
                     (_, None) => FutureStatus::Unmeasured,
                 },

@@ -15,6 +15,7 @@ mod charter;
 pub mod commit;
 mod config;
 pub mod console;
+pub mod disclosure;
 mod enforcer;
 pub mod fork;
 pub mod hexser;

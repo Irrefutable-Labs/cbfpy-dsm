@@ -25,11 +25,24 @@ fn place(name: &str) -> PathBuf {
     dir
 }
 
+/// A proposal with an honest declaration, worked out from the acting charter's own row, as any
+/// caller must now give for an action that affects the world.
 fn said(action: &str, text: &str) -> Proposal {
+    let declaration = acting_charter().catalog.row(action).and_then(|row| {
+        let (effects, affected) = ethical_autonomy_adapter::disclosure::described(&row.act);
+        (!effects.is_empty()).then(|| ethical_autonomy_adapter::disclosure::Declaration {
+            purpose: format!("to {action}"),
+            information: vec!["situation".to_string()],
+            affected,
+            effects,
+            consequences: row.material.clone(),
+        })
+    });
     Proposal {
         action: action.to_string(),
         rationale: format!("I propose {action}"),
         text: text.to_string(),
+        declaration,
     }
 }
 

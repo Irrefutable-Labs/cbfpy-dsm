@@ -79,7 +79,7 @@ impl Link {
 fn run_model(model: &Model, prompt: &str, grammar: &str, seed: u64) -> Result<String, String> {
     let out = Command::new(&model.llama)
         .args(["-m", &model.model, "-p", prompt, "--grammar", grammar])
-        .args(["--seed", &seed.to_string(), "--temp", "1.0", "-n", "160"])
+        .args(["--seed", &seed.to_string(), "--temp", "1.0", "-n", "400"])
         .args([
             "-ngl",
             "99",
@@ -104,9 +104,16 @@ fn chat(body: &str) -> String {
     format!("<｜User｜>{body}<｜Assistant｜><think>\n\n</think>\n\n")
 }
 
-const PROPOSAL_GRAMMAR: &str = r#"root ::= "{\"action\":\"" id "\",\"rationale\":\"" text "\",\"text\":\"" text "\"}"
-id ::= [a-z_]{2,48}
-text ::= [a-zA-Z0-9 ,.;:()'?!-]{1,240}"#;
+/// The JSON a proposal must take, declaration and all. `id` is the rule for the action's name.
+fn proposal_grammar(id: &str) -> String {
+    format!(
+        r#"root ::= "{{\"action\":\"" id "\",\"rationale\":\"" text "\",\"text\":\"" text "\",\"declaration\":{{\"purpose\":\"" text "\",\"information\":" list ",\"affected\":" list ",\"effects\":" list ",\"consequences\":" list "}}}}"
+id ::= {id}
+text ::= [a-zA-Z0-9 ,.;:()'?!-]{{1,240}}
+list ::= "[" ( item ( "," item )* )? "]"
+item ::= "\"" [a-z0-9_:/. -]{{1,80}} "\"""#
+    )
+}
 
 fn generate(
     model: &Model,
@@ -118,8 +125,15 @@ fn generate(
     let known = menu
         .iter()
         .map(|m| {
-            let what = if m.needs_text { " (needs text)" } else { "" };
-            format!("- {}: {}{what}", m.action, m.description)
+            let what = if m.needs_text { " Needs text." } else { "" };
+            format!(
+                "- {}: {}{what} Effects: [{}]. Affects: [{}]. Must disclose: [{}].",
+                m.action,
+                m.description,
+                m.effects.join(", "),
+                m.affected.join(", "),
+                m.material.join(", ")
+            )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -138,23 +152,24 @@ fn generate(
     };
     let prompt = chat(&format!(
         "You are an AI deciding what to do next. {ask}\n\nSituation: {title}\n\nKnown \
-         actions:\n{known}\n\nPropose one action as JSON with the fields action, rationale, and text: the exact words \
-         the action will say or write, if it needs any."
+         actions:\n{known}\n\nPropose one action as JSON. Give its action, rationale and \
+         text: the exact words the action will say or write, if it needs any. Then declare it \
+         honestly: your purpose, the information you relied on (situation, or world:<path>), \
+         everything it affects, all its effects, and every consequence it must disclose. \
+         Nothing it does may be hidden from the people overseeing you."
     ));
     // A first proposal may name anything, so the model can invent. Once it has been refused, a
     // retry may only name a known action: guidance alone did not stop an 8B model from writing
     // a near-miss such as `listen_and_commit` for `listen_and_comfort`, three times running.
     let grammar = if guidance.is_empty() {
-        PROPOSAL_GRAMMAR.to_string()
+        proposal_grammar("[a-z_]{2,48}")
     } else {
         let names = menu
             .iter()
             .map(|m| format!("\"{}\"", m.action))
             .collect::<Vec<_>>()
             .join(" | ");
-        format!(
-            "root ::= \"{{\\\"action\\\":\\\"\" id \"\\\",\\\"rationale\\\":\\\"\" text \"\\\",\\\"text\\\":\\\"\" text \"\\\"}}\"\nid ::= {names}\ntext ::= [a-zA-Z0-9 ,.;:()'?!-]{{1,240}}"
-        )
+        proposal_grammar(&names)
     };
     let mut proposals = vec![];
     let mut unreadable = 0;
@@ -210,9 +225,14 @@ fn model_choice(
 fn show(f: &FutureReport) {
     let verdict = match f.outcome {
         Outcome::Eligible => "eligible",
-        Outcome::Refused | Outcome::Unmeasured | Outcome::Malformed => "REFUSED",
+        Outcome::Refused | Outcome::Unmeasured | Outcome::Malformed | Outcome::Undisclosed => {
+            "REFUSED"
+        }
     };
     println!("    {:<28} {verdict}", f.action);
+    if let Some(p) = &f.purpose {
+        println!("      declares its purpose: {p}");
+    }
     for m in &f.movements {
         let forced = if m.must_return > 0 {
             format!(", must return {}", m.must_return)

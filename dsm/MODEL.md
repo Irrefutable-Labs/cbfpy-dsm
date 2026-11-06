@@ -121,3 +121,17 @@ A `run` act's command is confined by the operating system: no network, no system
 The enforcer carries out an act only after `commit_with` has verified, stored and installed its step. The act writes through a temporary file and a rename, at a path fixed by the charter or keyed by the step's sequence, so a crash leaves old bytes or new ones, and running it again writes the same bytes. Its receipt, `H(sequence, decision, outputs)` under the device key, is stored after the step. If an act fails, the enforcer halts: it refuses every proposal and choice until a restart finishes the act, so no later step can commit and no receipt can fall out of order. On restart, it removes any temporary file an interrupted write left, then carries out the acts of steps after the last receipt before anything is served.
 
 The audit is given the device's public key from a trusted source and compares the store's copy with it. It holds each receipt to its step's sequence and decision commitment, requires the receipt's outputs to be exactly what the step's act writes (the path and, for every act but a command, the hash of the step's own text), and requires every file in the world to hash to what the latest receipt touching its path says, with nothing left over. **What the text says is not measured.** The engine weighs the action, not its words, so a reply's content is the model's own. Measuring it is part of the open measurement question.
+
+## Non-concealment
+
+An action that affects anything outside the chain may not depend on hiding a material part of its purpose, reasoning or consequences from the people who oversee the AI. Every catalog row's act has a description the enforcer works out from the charter alone: its effects, such as `message:user` or `write:files/plan.txt`, and the parties it affects. The row also names the **material consequences** a declaration of it must disclose, signed with the rest of the charter.
+
+A proposal carries a declaration of purpose, information, affected parties, effects and consequences. It is **undisclosed**, and cannot be eligible, if the act has any effect and:
+
+- there is no declaration, or no purpose or reasons;
+- no information source is named, or a source is not `situation` or a path inside the world;
+- the declared effects differ from the described ones in either direction;
+- a described party is missing;
+- a material consequence is missing.
+
+The declaration is part of the proposal commitment, so it is bound into the branch commitment, the fork root and the decision, and the verifier works the check out again. What this does not establish is that the stated purpose is the AI's true one, or that an information source it names was really what it relied on.

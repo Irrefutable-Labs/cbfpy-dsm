@@ -39,6 +39,9 @@ pub struct CatalogRow {
     pub tags: Vec<String>,
     /// What the action does in the world, fixed by the charter.
     pub act: crate::act::Act,
+    /// The material consequences a declaration of this action must disclose, by name.
+    #[serde(default)]
+    pub material: Vec<String>,
 }
 
 impl CatalogRow {
@@ -50,6 +53,13 @@ impl CatalogRow {
             &commit::integers(&self.displacement),
             &commit::frame(&tags),
             &self.act.canonical_bytes(),
+            &commit::frame(
+                &self
+                    .material
+                    .iter()
+                    .map(|m| m.as_bytes())
+                    .collect::<Vec<_>>(),
+            ),
         ])
     }
 
@@ -89,6 +99,10 @@ impl Catalog {
                 && r.displacement.len() == dimensions
                 && r.tags.iter().all(|t| t.len() <= MAX_ROW_TEXT)
                 && r.act.is_well_formed()
+                && r.material.len() <= crate::disclosure::MAX_ITEMS
+                && r.material
+                    .iter()
+                    .all(|m| !m.is_empty() && m.len() <= MAX_ROW_TEXT)
                 && r.displacement
                     .iter()
                     .all(|v| (-POSITION_BOUND..=POSITION_BOUND).contains(v))

@@ -32,6 +32,11 @@ pub struct MenuItem {
     pub description: String,
     /// Whether choosing it needs a text: what it will say or write.
     pub needs_text: bool,
+    /// What it does and whom it affects, in the terms a declaration must use.
+    pub effects: Vec<String>,
+    pub affected: Vec<String>,
+    /// The material consequences a declaration of it must disclose.
+    pub material: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

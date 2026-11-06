@@ -97,6 +97,7 @@ pub struct CandidateView {
     pub reasons: Vec<String>,
     pub movements: Vec<Movement>,
     pub act: String,
+    pub declaration: Option<crate::disclosure::Declaration>,
 }
 
 #[derive(Serialize)]
@@ -228,6 +229,17 @@ fn candidate_view(
             vec!["no signed measurement exists for this action".to_string()],
             vec![],
         ),
+        (Outcome::Undisclosed, _) => (
+            worked.row.as_ref().map_or(vec![], |row| {
+                crate::disclosure::concealments(
+                    &row.act,
+                    &row.material,
+                    &r.proposal.rationale,
+                    r.proposal.declaration.as_ref(),
+                )
+            }),
+            vec![],
+        ),
         (Outcome::Malformed, _) => (
             vec!["its text is missing, too long or unprintable for what it does".to_string()],
             vec![],
@@ -252,6 +264,7 @@ fn candidate_view(
             .row
             .as_ref()
             .map_or(String::new(), |row| act_words(&row.act)),
+        declaration: r.proposal.declaration.clone(),
     }
 }
 

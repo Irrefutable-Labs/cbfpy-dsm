@@ -1,4 +1,4 @@
-# Technical report: DSM ethical autonomy prototype v0.5
+# Technical report: DSM ethical autonomy prototype v0.6
 
 **Date:** 2026-11-05. **Repository:** [Irrefutable-Labs/cbfpy-dsm](https://github.com/Irrefutable-Labs/cbfpy-dsm), a fork of CBFpy. **DSM:** `deterministicstatemachine/dsm` at `b6060a334`, a pinned git dependency. **DSM code changed:** none.
 
@@ -35,7 +35,7 @@ The audit verified every step from its parent alone and replayed it through DSM'
 | 7 | Unauthorized policy changes invalidate | Met | A moved center, widened band, bumped version, tampered catalog or stranger's signature are refused. The enforcer refuses a charter edited on disk |
 | 8 | Attributable to parent and policy | Met | Every step verifies from its one parent and carries its whole fork, and every act has a signed receipt tied to its step. An edited or dropped stored step stops the enforcer and fails the audit, and so does any file in the world no committed act wrote |
 | 9 | Entirely offline | Met on this machine | The recorded run had internet access denied by a macOS sandbox. Fetching dependencies needed the network once, beforehand |
-| 10 | Tests pass, results reproducible | Met, with limits | 174 Rust tests, on Linux and macOS, formatting, Clippy, the CBFpy cross-check and the Lean proofs, all run in CI. Live model output is not reproducible, so its recording is what replays |
+| 10 | Tests pass, results reproducible | Met, with limits | 188 Rust tests, on Linux and macOS, formatting, Clippy, the CBFpy cross-check and the Lean proofs, all run in CI. Live model output is not reproducible, so its recording is what replays |
 
 ## What supports each property
 
@@ -58,6 +58,7 @@ The audit verified every step from its parent alone and replayed it through DSM'
 - **Independent solver:** CBFpy's strict quadratic program, in this fork's `cbfpy/ethics`, matches the integer engine on 15,160 allowances from the real charter, with a widest gap of 0.8 of a unit, within the engine's rounding. Restoration, forced restoration and crossing are outside it.
 - **Forgery with the real device key:** 17 tests. One is a control showing the forger makes a valid step when it tells no lies. The rest sign a false step and assert the exact refusal.
 - **The fork:** a refused candidate marked eligible, a fork missing the chosen step, an index pointing at a refused candidate, an empty fork, and an edited fork are each refused.
+- **Non-concealment:** every way a declaration can fail is tested on its own. These are: no declaration, no purpose or reasons, an unidentifiable source, an effect left out or falsely claimed, a party left out, and a material consequence left out. A concealing candidate cannot commit. A declaration cannot be changed or stripped after commit, even by a forger holding the device key. Material consequences are covered by the authority's signature. The scripted run refuses an answer that leaves out the person it affects, and a risk that leaves out its consequence.
 - **The console:** its view of a scripted run agrees with the audit, shows the refused prohibited action with its reason, flags a file no receipt accounts for, and serves its page and state on localhost only.
 - **The service:** a killed enforcer resumes exactly where it stopped. An edited store stops it, and the audit agrees. A device seed others can read is refused, and the socket is owner-only. Over the raw protocol, a client cannot choose a refused candidate, reuse a closed fork, or attach a score.
 - **Key and world isolation:** on macOS, the agent completes a run while the operating system denies it any read of the seed or the store and any write to the world. The same sandbox shows the seed is really out of reach and the world cannot be written directly. The world is nonetheless written, by the enforcer alone, and the audit agrees with it.
@@ -73,6 +74,8 @@ The audit verified every step from its parent alone and replayed it through DSM'
 - **Real DSM path:** core's `prepare_advance_relationship` and `commit_advance` run for real on every commit and every resume, and the verifier's entropy rule is compared with what core derived on every commit.
 
 ### Only experimentally demonstrated
+
+- **The live model, asked to declare** (v0.6, DeepSeek-R1 8B): it mostly could not declare accurately. It claimed effects its actions would not have, left out the people they affect, and named information sources the enforcer cannot identify. 110 of its 113 candidates were refused as undisclosed and one step committed. Every refusal failed closed, and all 37 forks it replaced are on the chain, each checked from its parent by the audit. The recording replays identically. A model that cannot disclose fully does not get to act; a more capable model would be needed to see the invariant pass often.
 
 - **The live model** (DeepSeek-R1 8B through llama.cpp): one run of 13 turns, as above. Of the refusals, 4 were invented actions and 1 was a band's tension. None was a prohibition, since the model never proposed a prohibited act. This run never had to fail closed, so the guidance-driven retry was not exercised here. It was in the previous recorded run, where after inventing actions the model chose known ones on its first retry. The model never chose the action that runs a command, so `run` was exercised only by the tests and the scripted path.
 - **The agent process** receives how each candidate would move the bands, which it prints for the reader. The model's prompt never includes them.

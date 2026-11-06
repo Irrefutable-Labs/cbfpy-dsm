@@ -118,18 +118,22 @@ pub fn verify_step(
     let branch = commit::branch_commitment(
         &parent.tip,
         &policy,
-        &commit::proposal_commit(
-            &step.proposal.action,
-            &step.proposal.rationale,
-            &step.proposal.text,
-        ),
+        &commit::proposal_commit(&step.proposal),
         Some(&step.row),
     );
     if branch != step.branch_commitment {
         return Err(Refusal::BranchCommitmentMismatch);
     }
 
-    if !step.row.act.accepts_text(&step.proposal.text) {
+    if !step.row.act.accepts_text(&step.proposal.text)
+        || !crate::disclosure::concealments(
+            &step.row.act,
+            &step.row.material,
+            &step.proposal.rationale,
+            step.proposal.declaration.as_ref(),
+        )
+        .is_empty()
+    {
         return Err(Refusal::NotEligible);
     }
     // Run the deterministic rules again. Nothing the step claims about them is believed.

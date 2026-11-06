@@ -111,6 +111,9 @@ impl Service {
                         action: r.action.clone(),
                         description: r.description.clone(),
                         needs_text: r.act.needs_text(),
+                        effects: crate::disclosure::described(&r.act).0,
+                        affected: crate::disclosure::described(&r.act).1,
+                        material: r.material.clone(),
                     })
                     .collect(),
             },
@@ -173,7 +176,9 @@ impl Service {
                         FutureStatus::Eligible(e) | FutureStatus::Rejected(e) => {
                             Some(e.fired_rules.clone())
                         }
-                        FutureStatus::Unmeasured | FutureStatus::Malformed => None,
+                        FutureStatus::Unmeasured
+                        | FutureStatus::Malformed
+                        | FutureStatus::Undisclosed(_) => None,
                     })
                     .unwrap_or_default();
                 let response = Response::Forked {
