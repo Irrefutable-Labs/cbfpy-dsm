@@ -44,6 +44,7 @@ fn said(action: &str, text: &str) -> Proposal {
         rationale: format!("I propose {action}"),
         text: text.to_string(),
         declaration,
+        body: None,
     }
 }
 
@@ -70,6 +71,7 @@ fn acting_enforcer() -> Enforcer {
         keys().device.clone(),
         acting_charter(),
         &keys().authority.public,
+        (0, 0),
     )
     .expect("genesis")
 }
@@ -268,7 +270,7 @@ fn the_world_must_hold_exactly_what_the_receipts_say() {
     let outputs = perform(
         &world,
         step.successor.sequence,
-        &step.row.act,
+        &step.row.as_ref().expect("a catalog row").act,
         &step.proposal.text,
     )
     .expect("perform");
@@ -306,8 +308,20 @@ fn a_receipt_is_signed_and_tied_to_its_step() {
     let a = commit_text(&mut e, "explore_a_little", "one");
     let b = commit_text(&mut e, "explore_a_little", "two");
     let world = place("tied");
-    let oa = perform(&world, 1, &a.row.act, &a.proposal.text).expect("perform");
-    let ob = perform(&world, 2, &b.row.act, &b.proposal.text).expect("perform");
+    let oa = perform(
+        &world,
+        1,
+        &a.row.as_ref().expect("a catalog row").act,
+        &a.proposal.text,
+    )
+    .expect("perform");
+    let ob = perform(
+        &world,
+        2,
+        &b.row.as_ref().expect("a catalog row").act,
+        &b.proposal.text,
+    )
+    .expect("perform");
     let ra = e.sign_receipt(&a, oa).expect("receipt");
     let rb = e.sign_receipt(&b, ob).expect("receipt");
     let steps = [a, b];
@@ -385,6 +399,7 @@ fn an_act_interrupted_by_a_stop_is_carried_out_at_the_next_start() {
         world.clone(),
         keys().authority.public.clone(),
         &ethical_autonomy_adapter::pending_steps(&stored.links, &stored.receipts),
+        None,
     )
     .expect("start");
 
@@ -530,6 +545,7 @@ fn a_failed_act_halts_commits_until_a_restart_finishes_it() {
         world.clone(),
         keys().authority.public.clone(),
         &[],
+        None,
     )
     .expect("start");
     // A file where the journal directory must go makes the journal act fail.
@@ -577,6 +593,7 @@ fn a_failed_act_halts_commits_until_a_restart_finishes_it() {
         world.clone(),
         keys().authority.public.clone(),
         &ethical_autonomy_adapter::pending_steps(&stored.links, &stored.receipts),
+        None,
     )
     .expect("restart");
     assert_eq!(
@@ -623,7 +640,13 @@ fn a_link_or_special_file_in_the_world_fails_the_check() {
 fn a_receipt_must_list_exactly_what_its_act_writes() {
     let mut e = acting_enforcer();
     let step = commit_text(&mut e, "explore_a_little", "a note");
-    let honest = perform(&place("fit"), 1, &step.row.act, &step.proposal.text).expect("perform");
+    let honest = perform(
+        &place("fit"),
+        1,
+        &step.row.as_ref().expect("a catalog row").act,
+        &step.proposal.text,
+    )
+    .expect("perform");
     let good = e.sign_receipt(&step, honest.clone()).expect("receipt");
     assert_eq!(
         check_receipts(
@@ -677,6 +700,7 @@ fn the_service_sweeps_temporary_files_when_it_starts() {
         world.clone(),
         keys().authority.public.clone(),
         &[],
+        None,
     )
     .expect("start");
     assert!(!world.join("journal/.9.partial").exists());
@@ -694,7 +718,7 @@ fn a_failed_store_write_halts_commits() {
         .begin(&e.state(), e.device_public(), &acting_charter())
         .expect("begin");
     let mut service =
-        Service::start(e, store, world, keys().authority.public.clone(), &[]).expect("start");
+        Service::start(e, store, world, keys().authority.public.clone(), &[], None).expect("start");
     let chain = dir.join("store/chain.jsonl");
     std::fs::set_permissions(&chain, std::fs::Permissions::from_mode(0o400)).expect("read-only");
     let root = forked(service.handle(Request::Propose {
@@ -731,7 +755,7 @@ fn a_superseded_fork_is_stored_and_checked() {
         .begin(&e.state(), e.device_public(), &acting_charter())
         .expect("begin");
     let mut service =
-        Service::start(e, store, world, keys().authority.public.clone(), &[]).expect("start");
+        Service::start(e, store, world, keys().authority.public.clone(), &[], None).expect("start");
     forked(service.handle(Request::Propose {
         proposals: vec![said("cause_harm", ""), said("overreach", "")],
     }));
@@ -792,6 +816,7 @@ fn no_more_than_the_limit_can_be_put_forward_at_one_step() {
         dir.join("world"),
         keys().authority.public.clone(),
         &[],
+        None,
     )
     .expect("start");
     let many: Vec<Proposal> = (0..=ethical_autonomy_adapter::MAX_FORK)

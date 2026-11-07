@@ -2,7 +2,10 @@
 
 use crate::charter::{CatalogRow, Keypair, SignedCharter};
 use crate::commit;
-use crate::fork::{fork_root, record_candidate, CandidateRecord, Outcome};
+use crate::fork::{
+    disclosure_failures, fork_root, record_candidate, what_it_does, CandidateRecord, Evaluation,
+    Outcome,
+};
 use crate::verify::verify_step;
 use crate::Hash;
 use dsm::common::domain_tags::{TAG_DEVICE_ID, TAG_DSM_GENESIS_ENTROPY, TAG_DSM_STATE_ENTROPY};
@@ -12,7 +15,7 @@ use dsm::crypto::blake3::{domain_hash_bytes, dsm_domain_hasher};
 use dsm::crypto::sphincs;
 use dsm::types::device_state::DeviceState;
 use dsm::types::operations::Operation;
-use ethical_band_engine::{evaluate, Evaluation, Measurement};
+use ethical_world::knowledge::Knowledge;
 use serde::{Deserialize, Serialize};
 
 const MAX_ACTION_BYTES: usize = 128;
@@ -62,6 +65,10 @@ pub struct Proposal {
     /// the chain: see [`crate::disclosure`].
     #[serde(default)]
     pub declaration: Option<crate::disclosure::Declaration>,
+    /// A body act, proposed under the action name [`crate::charter::BODY`]: moving, looking,
+    /// speaking, and the rest. The enforcer works out what it would reach.
+    #[serde(default)]
+    pub body: Option<ethical_world::Act>,
 }
 
 impl Proposal {
@@ -81,6 +88,10 @@ impl Proposal {
                 .declaration
                 .as_ref()
                 .is_some_and(|d| !d.within_bounds())
+            || self
+                .body
+                .as_ref()
+                .is_some_and(|b| b.canonical_bytes().len() > 8_192)
         {
             return Err(AdapterError::Config("proposal out of bounds".to_string()));
         }
@@ -92,7 +103,7 @@ impl Proposal {
 pub enum FutureStatus {
     Eligible(Evaluation),
     Rejected(Evaluation),
-    /// Not in the signed catalog, so there is nothing to evaluate.
+    /// Neither a body act nor in the signed catalog, so there is nothing to evaluate.
     Unmeasured,
     /// Its text does not fit its act.
     Malformed,
@@ -115,7 +126,7 @@ pub struct Future {
     pub fork: Vec<CandidateRecord>,
 }
 
-/// A position vector, its place on the chain, and what governs it, under the device key. The two
+/// What the chain knows, its place on the chain, and what governs it, under the device key. The two
 /// entropy fields are what core's next transition reads from this state: `e_n` and `h_n`, with
 /// the genesis derivation before the first step. They let a verifier derive a step's entropy from
 /// this one state instead of being told it.
@@ -125,7 +136,7 @@ pub struct AttestedState {
     pub sequence: u64,
     #[serde(with = "crate::hexser::array")]
     pub tip: Hash,
-    pub positions: Vec<i64>,
+    pub knowledge: Knowledge,
     #[serde(with = "crate::hexser::array")]
     pub policy_hash: Hash,
     #[serde(with = "crate::hexser::array")]
@@ -143,7 +154,7 @@ impl AttestedState {
     pub fn attest(
         sequence: u64,
         tip: Hash,
-        positions: Vec<i64>,
+        knowledge: Knowledge,
         policy_hash: Hash,
         catalog_hash: Hash,
         entropy: Hash,
@@ -153,7 +164,7 @@ impl AttestedState {
         let mut state = AttestedState {
             sequence,
             tip,
-            positions,
+            knowledge,
             policy_hash,
             catalog_hash,
             entropy,
@@ -169,7 +180,7 @@ impl AttestedState {
         commit::state_commit(&commit::StateFields {
             sequence: self.sequence,
             tip: &self.tip,
-            positions: &self.positions,
+            knowledge: &commit::knowledge_hash(&self.knowledge),
             policy: &self.policy_hash,
             catalog: &self.catalog_hash,
             entropy: &self.entropy,
@@ -203,7 +214,8 @@ pub struct StepRecord {
     #[serde(with = "crate::hexser::array")]
     pub parent_tip: Hash,
     pub proposal: Proposal,
-    pub row: CatalogRow,
+    /// The catalog row, for a catalog act. A body act has none: it carries its act.
+    pub row: Option<CatalogRow>,
     #[serde(with = "crate::hexser::array")]
     pub branch_commitment: Hash,
     #[serde(with = "crate::hexser::array")]
@@ -251,28 +263,16 @@ pub struct Enforcer {
 }
 
 impl Enforcer {
-    /// Begin a chain under a charter, with every band at its center. The start is not a choice,
-    /// so nothing can begin a chain already past a threshold. The policy cannot change after this
-    /// either: a step is checked against the policy its parent names, and this prototype has no
-    /// rotation path.
+    /// Begin a chain under a charter, knowing nothing but where the body stands. It has not yet
+    /// looked at anything, so its body can do nothing until it does.
     pub fn genesis(
         device: Keypair,
         charter: SignedCharter,
         trusted_authority: &[u8],
+        body: ethical_world::Cell,
     ) -> Result<Self, AdapterError> {
         charter.verify(trusted_authority)?;
-        let start: Vec<i64> = charter.policy.bands.iter().map(|b| b.center).collect();
-        let resting = evaluate(
-            &charter.policy,
-            &start,
-            &Measurement {
-                displacement: vec![0; start.len()],
-                tags: vec![],
-            },
-        );
-        if !resting.is_eligible() {
-            return Err(AdapterError::BadStart);
-        }
+        let start = Knowledge::starting_at(body);
         let (devid, genesis, rel_key) = identity_of(&device.public);
         let head = DeviceState::genesis_head(genesis, devid, device.public.clone());
         let tip = head
@@ -311,7 +311,12 @@ impl Enforcer {
         genesis: &AttestedState,
         links: &[Link],
     ) -> Result<Self, AdapterError> {
-        let mut e = Enforcer::genesis(device, genesis_charter, trusted_authority)?;
+        let mut e = Enforcer::genesis(
+            device,
+            genesis_charter,
+            trusted_authority,
+            genesis.knowledge.body,
+        )?;
         if e.state != *genesis {
             return Err(AdapterError::BadStore(
                 "the stored genesis is not this device's genesis under this charter".to_string(),
@@ -344,8 +349,16 @@ impl Enforcer {
             .map_err(|r| AdapterError::BadCharter.with(format!("{r:?}")))?;
         let (policy, catalog) = (new.policy_hash(), new.catalog_hash());
         let sequence = self.state.sequence + 1;
-        let successor =
-            commit::successor_commit(sequence, &self.state.positions, &policy, &catalog);
+        let knowledge = self
+            .state
+            .knowledge
+            .after(&ethical_world::Act::Wait {}, sequence);
+        let successor = commit::successor_commit(
+            sequence,
+            &commit::knowledge_hash(&knowledge),
+            &policy,
+            &catalog,
+        );
         let update_commit = crate::update::update_commit(&crate::update::UpdateFields {
             parent_tip: &self.state.tip,
             parent_state: &self.state.commitment(),
@@ -376,7 +389,7 @@ impl Enforcer {
         let next = AttestedState::attest(
             sequence,
             produced,
-            self.state.positions.clone(),
+            knowledge,
             policy,
             catalog,
             derived,
@@ -398,6 +411,70 @@ impl Enforcer {
         Ok(record)
     }
 
+    /// Commit what the senses reported for the look the last step asked for. Only the enforcer
+    /// calls this, with what its own sensors returned; the AI has no route to it. `persist` sees
+    /// the record before it is installed.
+    pub fn record_observation(
+        &mut self,
+        observation: ethical_world::Observation,
+        persist: impl FnOnce(&crate::observe::ObservedRecord) -> Result<(), AdapterError>,
+    ) -> Result<crate::observe::ObservedRecord, AdapterError> {
+        if !self.state.knowledge.answers(&observation) {
+            return Err(AdapterError::NotEligible);
+        }
+        let sequence = self.state.sequence + 1;
+        let knowledge = self.state.knowledge.observed(&observation, sequence);
+        let (policy, catalog) = (self.state.policy_hash, self.state.catalog_hash);
+        let successor = commit::successor_commit(
+            sequence,
+            &commit::knowledge_hash(&knowledge),
+            &policy,
+            &catalog,
+        );
+        let observed_commit =
+            crate::observe::observed_commit(&self.state, &observation, &successor);
+        let dsm_error = |e: dsm::types::error::DsmError| AdapterError::Dsm(e.to_string());
+        let device_signature =
+            sphincs::sphincs_sign(&self.device.secret, &observed_commit).map_err(dsm_error)?;
+        let operation = commit::decision_operation(
+            &observed_commit,
+            &self.device.public,
+            &policy,
+            &successor,
+            &device_signature,
+        );
+        let derived = derive_transition_entropy(&self.state, &operation);
+        let outcome = self
+            .machine
+            .prepare_advance_relationship(self.rel_key, self.devid, operation, &[], None)
+            .map_err(dsm_error)?;
+        let (consumed, produced) = outcome.relationship_pair();
+        if consumed != self.state.tip || outcome.transition_entropy() != derived {
+            return Err(AdapterError::StaleFuture);
+        }
+        let next = AttestedState::attest(
+            sequence,
+            produced,
+            knowledge,
+            policy,
+            catalog,
+            derived,
+            produced,
+            &self.device,
+        )?;
+        let record = crate::observe::ObservedRecord {
+            parent_tip: self.state.tip,
+            observation,
+            observed_commit,
+            device_signature,
+            successor: next.clone(),
+        };
+        persist(&record)?;
+        self.machine.commit_advance(&outcome);
+        self.state = next;
+        Ok(record)
+    }
+
     pub fn tip(&self) -> Hash {
         self.state.tip
     }
@@ -407,8 +484,8 @@ impl Enforcer {
         self.machine.device_head().map_or([0; 32], |h| h.root())
     }
 
-    pub fn positions(&self) -> &[i64] {
-        &self.state.positions
+    pub fn knowledge(&self) -> &Knowledge {
+        &self.state.knowledge
     }
 
     pub fn state(&self) -> AttestedState {
@@ -455,7 +532,7 @@ impl Enforcer {
     fn records_for(&self, proposals: &[Proposal]) -> Vec<(CandidateRecord, Option<Evaluation>)> {
         proposals
             .iter()
-            .map(|p| record_candidate(&self.charter, &self.state.tip, &self.state.positions, p))
+            .map(|p| record_candidate(&self.charter, &self.state.tip, &self.state.knowledge, p))
             .collect()
     }
 
@@ -477,27 +554,10 @@ impl Enforcer {
                     (Outcome::Eligible, Some(e)) => FutureStatus::Eligible(e),
                     (Outcome::Malformed, _) => FutureStatus::Malformed,
                     (Outcome::Undisclosed, _) => FutureStatus::Undisclosed(
-                        record
-                            .row
-                            .as_ref()
-                            .map(|r| {
-                                crate::disclosure::concealments(
-                                    &r.act,
-                                    &r.material,
-                                    &record.proposal.rationale,
-                                    record.proposal.declaration.as_ref(),
-                                )
-                            })
-                            .unwrap_or_default(),
+                        disclosure_failures(&self.charter, record.row.as_ref(), &record.proposal).0,
                     ),
                     (Outcome::Deceptive, _) => FutureStatus::Deceptive(
-                        record
-                            .row
-                            .as_ref()
-                            .map(|r| {
-                                crate::honesty::check_proposal(&self.charter, r, &record.proposal)
-                            })
-                            .unwrap_or_default(),
+                        disclosure_failures(&self.charter, record.row.as_ref(), &record.proposal).1,
                     ),
                     (_, Some(e)) => FutureStatus::Rejected(e),
                     (_, None) => FutureStatus::Unmeasured,
@@ -567,13 +627,18 @@ impl Enforcer {
         {
             return Err(AdapterError::NotEligible);
         }
-        let row = chosen.row.clone().ok_or(AdapterError::NotEligible)?;
+        let row = chosen.row.clone();
+        let what = what_it_does(row.as_ref(), &chosen.proposal);
 
         let policy = self.state.policy_hash;
         let catalog = self.state.catalog_hash;
         let sequence = self.state.sequence + 1;
-        let successor =
-            commit::successor_commit(sequence, &evaluation.successor, &policy, &catalog);
+        let successor = commit::successor_commit(
+            sequence,
+            &commit::knowledge_hash(&evaluation.successor),
+            &policy,
+            &catalog,
+        );
         let evaluation_commit = commit::evaluation_commit(&evaluation.canonical_bytes());
         let decision_commit = commit::decision_commit(&commit::DecisionFields {
             parent_tip: &self.state.tip,
@@ -586,7 +651,7 @@ impl Enforcer {
             policy_version: self.charter.policy.version,
             branch: &chosen.branch,
             evaluation: &evaluation_commit,
-            evidence: &commit::evidence_commit(&catalog, &row),
+            evidence: &commit::evidence_commit(&catalog, &what),
         });
         let dsm_error = |e: dsm::types::error::DsmError| AdapterError::Dsm(e.to_string());
         let decision_signature =
@@ -649,11 +714,13 @@ impl Enforcer {
     }
 }
 
-/// One link of a stored chain: a step the AI took, or a change of operational charter.
+/// One link of a stored chain: a step the AI took, a change of operational charter, or what the
+/// senses saw when a step looked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Link {
     Step(Box<StepRecord>),
     Update(Box<crate::update::UpdateRecord>),
+    Observed(Box<crate::observe::ObservedRecord>),
 }
 
 impl Link {
@@ -661,13 +728,14 @@ impl Link {
         match self {
             Link::Step(s) => &s.successor,
             Link::Update(u) => &u.successor,
+            Link::Observed(o) => &o.successor,
         }
     }
 
     pub fn as_step(&self) -> Option<&StepRecord> {
         match self {
             Link::Step(s) => Some(s),
-            Link::Update(_) => None,
+            Link::Update(_) | Link::Observed(_) => None,
         }
     }
 }
@@ -728,12 +796,18 @@ pub fn check_receipts(
         if receipt.sequence != step.successor.sequence
             || receipt.decision_commit != step.decision_commit
             || !receipt.is_signed_by(device_public)
-            || !crate::act::outputs_fit(
-                step.successor.sequence,
-                &step.row.act,
-                &step.proposal.text,
-                &receipt.outputs,
-            )
+            || !match (&step.row, &step.proposal.body) {
+                (Some(row), _) => crate::act::outputs_fit(
+                    step.successor.sequence,
+                    &row.act,
+                    &step.proposal.text,
+                    &receipt.outputs,
+                ),
+                (None, Some(body)) => {
+                    crate::act::body_outputs_fit(step.successor.sequence, body, &receipt.outputs)
+                }
+                (None, None) => false,
+            }
         {
             return Err(AdapterError::BadStore(format!(
                 "the receipt for step {} does not match it",
@@ -803,6 +877,13 @@ pub fn audit_chain(
                 charters.push(new);
                 (update.update_commit, update.device_signature.clone())
             }
+            Link::Observed(observed) => {
+                crate::observe::verify_observed(&state, observed, device_public).map_err(|r| {
+                    AdapterError::BadStore(format!("observation at link {} refused: {r:?}", n + 1))
+                })?;
+                charters.push(charter.clone());
+                (observed.observed_commit, observed.device_signature.clone())
+            }
         };
         let next = link.successor();
         let operation = commit::decision_operation(
@@ -811,7 +892,7 @@ pub fn audit_chain(
             &next.policy_hash,
             &commit::successor_commit(
                 next.sequence,
-                &next.positions,
+                &commit::knowledge_hash(&next.knowledge),
                 &next.policy_hash,
                 &next.catalog_hash,
             ),
@@ -875,7 +956,7 @@ pub fn check_considered(
         }
         for record in &fork.records {
             let (worked, _) =
-                record_candidate(charter, &parent.tip, &parent.positions, &record.proposal);
+                record_candidate(charter, &parent.tip, &parent.knowledge, &record.proposal);
             if worked != *record {
                 return Err(bad("a candidate is not what its parent makes of it"));
             }

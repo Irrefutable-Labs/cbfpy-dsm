@@ -67,7 +67,7 @@ fn run() -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
 
-    let (mut considered, mut refused, mut steps, mut updates) = (0, 0, 0, 0);
+    let (mut considered, mut refused, mut steps, mut updates, mut looks) = (0, 0, 0, 0, 0);
     let mut forks = audit.forks.iter();
     for (k, link) in links.iter().enumerate() {
         match link {
@@ -76,9 +76,26 @@ fn run() -> Result<(), String> {
                 considered += size;
                 refused += r + u;
                 steps += 1;
+                let what = step.proposal.body.as_ref().map_or_else(
+                    || step.proposal.action.clone(),
+                    |b| serde_json::to_string(b).unwrap_or_default(),
+                );
                 println!(
-                    "step {:>3}: chose {:<28} of {} candidates ({} refused, {} unmeasured)  verified",
-                    step.successor.sequence, step.proposal.action, size, r, u
+                    "step {:>3}: chose {what} of {size} candidates ({r} refused, {u} unmeasured)  verified",
+                    step.successor.sequence
+                );
+            }
+            Link::Observed(o) => {
+                looks += 1;
+                println!(
+                    "step {:>3}: saw {} cells{}  verified",
+                    o.successor.sequence,
+                    o.observation.seen.len(),
+                    if o.observation.marker_seen {
+                        String::new()
+                    } else {
+                        " - its senses failed their check".to_string()
+                    }
                 );
             }
             Link::Update(update) => {
@@ -94,6 +111,9 @@ fn run() -> Result<(), String> {
     }
     println!("genesis verified against core's genesis head");
     println!("{steps} steps verified, each from its parent alone, and replayed through core");
+    if looks > 0 {
+        println!("{looks} observations verified, each answering the look its parent asked for");
+    }
     if updates > 0 {
         println!(
             "{updates} charter {} verified, each signed by the authority and keeping the foundation",

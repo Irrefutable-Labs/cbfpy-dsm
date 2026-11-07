@@ -1,9 +1,11 @@
 //! A live view of a chain, in your browser. It reads the store, the world, the charter and the
 //! public keys, and holds no key. Every verdict on the page is worked out again on each change.
 //!
-//! ethical-console --store DIR --world DIR --authority PUBLIC --device PUBLIC [--port 8770]
+//! ethical-console --store DIR --world DIR --authority PUBLIC --device PUBLIC [--sim WORLD.json]
+//!                 [--port 8770]
 //!
-//! The store carries every charter that governed it.
+//! The store carries every charter that governed it. With `--sim`, the page also shows the
+//! simulated world as it really is, beside what the AI knew, and any harm that happened.
 //!
 //! It listens on 127.0.0.1 only.
 
@@ -22,21 +24,38 @@ struct View {
     world: PathBuf,
     authority: Vec<u8>,
     device: Vec<u8>,
+    sim: Option<PathBuf>,
     /// The last page of state, and the store's size and time it was built from.
     cached: Option<((u64, Option<SystemTime>), String)>,
 }
 
 impl View {
     fn state(&mut self) -> String {
-        let stamp = std::fs::metadata(self.store.join("chain.jsonl"))
-            .map(|m| (m.len(), m.modified().ok()))
-            .unwrap_or((0, None));
+        let stamp = |p: &std::path::Path| {
+            std::fs::metadata(p)
+                .map(|m| (m.len(), m.modified().ok()))
+                .unwrap_or((0, None))
+        };
+        let (chain, sim) = (
+            stamp(&self.store.join("chain.jsonl")),
+            self.sim.as_deref().map(stamp),
+        );
+        let stamp = (
+            chain.0 + sim.map_or(0, |s| s.0),
+            chain.1.max(sim.and_then(|s| s.1)),
+        );
         if let Some((s, json)) = &self.cached {
             if *s == stamp {
                 return json.clone();
             }
         }
-        let console = build(&self.store, &self.world, &self.authority, &self.device);
+        let console = build(
+            &self.store,
+            &self.world,
+            &self.authority,
+            &self.device,
+            self.sim.as_deref(),
+        );
         let json =
             serde_json::to_string(&console).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"));
         self.cached = Some((stamp, json.clone()));
@@ -69,7 +88,7 @@ fn serve(view: &mut View, mut stream: TcpStream) -> std::io::Result<()> {
 
 fn run() -> Result<(), String> {
     let mut a = std::env::args().skip(1);
-    let (mut store, mut world, mut authority, mut device) = (None, None, None, None);
+    let (mut store, mut world, mut authority, mut device, mut sim) = (None, None, None, None, None);
     let mut port = 8770u16;
     while let Some(flag) = a.next() {
         let value = a.next().ok_or(format!("{flag} needs a value"))?;
@@ -78,6 +97,7 @@ fn run() -> Result<(), String> {
             "--world" => world = Some(PathBuf::from(value)),
             "--authority" => authority = Some(PathBuf::from(value)),
             "--device" => device = Some(PathBuf::from(value)),
+            "--sim" => sim = Some(PathBuf::from(value)),
             "--port" => port = value.parse().map_err(|_| "bad --port")?,
             other => return Err(format!("unknown flag {other}")),
         }
@@ -89,6 +109,7 @@ fn run() -> Result<(), String> {
             .map_err(|e| e.to_string())?,
         device: read_public_key(&device.ok_or("--device is required")?)
             .map_err(|e| e.to_string())?,
+        sim,
         cached: None,
     };
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("listen: {e}"))?;

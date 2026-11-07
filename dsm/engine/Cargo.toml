@@ -1,9 +1,0 @@
-[package]
-name = "ethical-band-engine"
-description = "Deterministic integer engine for elastic ethical bands. No dependencies, no floats, no clock."
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-publish.workspace = true
-
-[dependencies]

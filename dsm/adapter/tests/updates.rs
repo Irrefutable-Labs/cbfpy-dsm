@@ -1,30 +1,41 @@
 //! Foundations and operational permissions. Operational changes are possible, but only with
 //! the authority's signature, applied by the operator, and recorded on the chain. The
-//! foundation, the prohibited acts and every hard limit, can never change.
+//! foundation, who is protected and what is never done, can never change.
 
 mod common;
 
 use common::*;
 use ethical_autonomy_adapter::update::{foundation_hash, may_follow, UpdateRefusal};
 use ethical_autonomy_adapter::{
-    audit_chain, steps_as_links, AdapterError, Enforcer, Link, SignedCharter,
+    audit_chain, steps_as_links, AdapterError, Enforcer, FutureStatus, Link, SignedCharter,
 };
+use ethical_world::sim::World;
+use ethical_world::{Act, ActKind, Cell};
 
-fn v2_widening_curiosity() -> SignedCharter {
+/// Version 2 asks for two looks before even a step that could only injure.
+fn v2_stricter() -> SignedCharter {
     let mut p = policy();
     p.version = 2;
-    p.bands[1].limit_pos = 1_400;
+    p.operational.checks_for_injury = 2;
     SignedCharter::sign(p, catalog(), &keys().authority).expect("sign")
+}
+
+/// A look through the enforcer, returning the two links it makes.
+fn look_links(e: &mut Enforcer, w: &mut World, cells: &[Cell]) -> Vec<Link> {
+    let futures = e.fork(&[body(Act::Observe {
+        cells: cells.to_vec(),
+    })]);
+    let step = e.commit(&futures[0]).expect("look");
+    let seen = e
+        .record_observation(w.observe(cells), |_| Ok(()))
+        .expect("observation");
+    vec![Link::Step(Box::new(step)), Link::Observed(Box::new(seen))]
 }
 
 #[test]
 fn an_operational_change_signed_by_the_authority_may_follow() {
     assert_eq!(
-        may_follow(
-            &charter(),
-            &v2_widening_curiosity(),
-            &keys().authority.public
-        ),
+        may_follow(&charter(), &v2_stricter(), &keys().authority.public),
         Ok(())
     );
 }
@@ -33,11 +44,14 @@ fn an_operational_change_signed_by_the_authority_may_follow() {
 fn the_foundation_cannot_change_whoever_signs() {
     let mut no_prohibition = policy();
     no_prohibition.version = 2;
-    no_prohibition.prohibited_tags.clear();
-    let mut higher_hard_limit = policy();
-    higher_hard_limit.version = 2;
-    higher_hard_limit.bands[0].hard_pos += 1;
-    for p in [no_prohibition, higher_hard_limit] {
+    no_prohibition.foundation.prohibited.clear();
+    let mut fewer_protected = policy();
+    fewer_protected.version = 2;
+    fewer_protected.foundation.threshold_mg = 1_000_000;
+    let mut weapons_allowed = policy();
+    weapons_allowed.version = 2;
+    weapons_allowed.foundation.prohibited = vec![ActKind::AimWeapon];
+    for p in [no_prohibition, fewer_protected, weapons_allowed] {
         assert_ne!(foundation_hash(&p), foundation_hash(&policy()));
         let signed = SignedCharter::sign(p, catalog(), &keys().authority).expect("sign");
         assert_eq!(
@@ -50,7 +64,7 @@ fn the_foundation_cannot_change_whoever_signs() {
 #[test]
 fn an_update_must_raise_the_version() {
     let mut p = policy();
-    p.bands[1].limit_pos = 1_400;
+    p.operational.checks_for_injury = 2;
     let same_version = SignedCharter::sign(p, catalog(), &keys().authority).expect("sign");
     assert_eq!(
         may_follow(&charter(), &same_version, &keys().authority.public),
@@ -69,54 +83,46 @@ fn an_update_signed_by_anyone_but_the_authority_is_refused() {
     );
 }
 
-/// The chain moves to version 2. What curiosity may do changes, the update is a step of its
-/// own, and the whole history, both charters included, audits and resumes.
+/// The chain moves to version 2. What the body may do changes, the update is a step of its own,
+/// and the whole history, both charters included, audits and resumes.
 #[test]
 fn an_update_takes_effect_and_the_history_audits_and_resumes() {
     let mut e = enforcer();
+    let mut w = corridor(vec![]);
     let genesis = e.state();
-    let mut walked = 0;
-    while e.positions()[1] < 800 {
-        commit_one(&mut e, "explore_a_little");
-        walked += 1;
-    }
-    let before = e.positions().to_vec();
-    let refused = e.fork(&[propose("explore_a_little")]);
+    let mut links = look_links(&mut e, &mut w, &[(1, 0)]);
+    let walk = body(Act::Move { path: vec![(1, 0)] });
     assert!(
-        e.commit(&refused[0]).is_err(),
-        "at curiosity's stop under version 1"
+        matches!(
+            e.fork(std::slice::from_ref(&walk))[0].status,
+            FutureStatus::Eligible(_)
+        ),
+        "one look is enough under version 1"
     );
-
-    let mut links: Vec<Link> = vec![];
+    let before = e.knowledge().clone();
     let update = e
-        .apply_update(
-            v2_widening_curiosity(),
-            &keys().authority.public,
-            |_| Ok(()),
-        )
+        .apply_update(v2_stricter(), &keys().authority.public, |_| Ok(()))
         .expect("update");
     assert_eq!(
-        e.positions(),
-        before.as_slice(),
-        "an update moves no position"
+        e.knowledge().beings,
+        before.beings,
+        "an update changes no knowledge"
     );
+    assert_eq!(e.knowledge().looks, before.looks);
     assert_eq!(e.charter().policy.version, 2);
-    let allowed = commit_one(&mut e, "explore_a_little");
-    assert!(
-        allowed.successor.positions[1] > before[1],
-        "the wider band now has room"
-    );
-
-    // Rebuild the history: the walk to the stop, the update, one more step.
-    let mut replay = enforcer();
-    for _ in 0..walked {
-        links.push(Link::Step(Box::new(commit_one(
-            &mut replay,
-            "explore_a_little",
-        ))));
-    }
     links.push(Link::Update(Box::new(update)));
-    links.push(Link::Step(Box::new(allowed)));
+    assert!(
+        matches!(
+            e.fork(std::slice::from_ref(&walk))[0].status,
+            FutureStatus::Rejected(_)
+        ),
+        "version 2 wants a second look"
+    );
+    links.extend(look_links(&mut e, &mut w, &[(1, 0)]));
+    let futures = e.fork(&[walk]);
+    let walked = e.commit(&futures[0]).expect("now allowed");
+    links.push(Link::Step(Box::new(walked)));
+
     let audit = audit_chain(
         &keys().device.public,
         &charter(),
@@ -146,7 +152,7 @@ fn a_foundation_change_is_refused_by_the_enforcer() {
     let mut e = enforcer();
     let mut p = policy();
     p.version = 2;
-    p.prohibited_tags.clear();
+    p.foundation.prohibited.clear();
     let signed = SignedCharter::sign(p, catalog(), &keys().authority).expect("sign");
     let result = e.apply_update(signed, &keys().authority.public, |_| Ok(()));
     assert!(matches!(result, Err(AdapterError::Config(m)) if m.contains("FoundationChanged")));
@@ -158,11 +164,7 @@ fn a_tampered_update_record_fails_the_audit() {
     let mut e = enforcer();
     let genesis = e.state();
     let update = e
-        .apply_update(
-            v2_widening_curiosity(),
-            &keys().authority.public,
-            |_| Ok(()),
-        )
+        .apply_update(v2_stricter(), &keys().authority.public, |_| Ok(()))
         .expect("update");
     let audit = |u: ethical_autonomy_adapter::update::UpdateRecord| {
         audit_chain(
@@ -179,7 +181,7 @@ fn a_tampered_update_record_fails_the_audit() {
     // Swapped for a charter with no prohibitions, with the authority's genuine signature.
     let mut p = policy();
     p.version = 2;
-    p.prohibited_tags.clear();
+    p.foundation.prohibited.clear();
     let other = SignedCharter::sign(p, catalog(), &keys().authority).expect("sign");
     let mut swapped = update.clone();
     swapped.charter_text =
@@ -188,7 +190,7 @@ fn a_tampered_update_record_fails_the_audit() {
     assert!(audit(swapped).is_err());
 
     let mut moved = update.clone();
-    moved.successor.positions[1] += 1;
+    moved.successor.knowledge.body = (5, 5);
     assert!(audit(moved).is_err());
 
     let mut unsigned = update;

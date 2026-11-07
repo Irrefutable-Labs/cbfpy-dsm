@@ -1,10 +1,10 @@
-//! What the policy authority signs: the bands, and the measurements of the actions.
+//! What the charter authority signs: the protected-life rules, and the catalog of the acts the AI
+//! may take outside its body (replies, messages, files, commands).
 
 use crate::commit;
 use crate::enforcer::AdapterError;
 use crate::Hash;
 use dsm::crypto::sphincs::{self, SphincsVariant};
-use ethical_band_engine::{Measurement, Policy, POSITION_BOUND};
 
 #[derive(Clone)]
 pub struct Keypair {
@@ -29,14 +29,40 @@ pub fn keypair_from_seed(seed: &[u8; 32]) -> Result<Keypair, AdapterError> {
     })
 }
 
-/// The independently supplied measurement of one action.
+/// The rules: who is protected and what is never done, which no update may change, and what the
+/// authority may tune inside that. See `ethical_world` and the design note.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Policy {
+    pub version: u64,
+    pub foundation: ethical_world::Foundation,
+    pub operational: ethical_world::Operational,
+}
+
+impl Policy {
+    pub fn validate(&self) -> Result<(), String> {
+        self.foundation.validate()?;
+        self.operational.validate()
+    }
+
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        commit::frame(&[
+            &self.version.to_be_bytes(),
+            &serde_json::to_vec(&self.foundation).unwrap_or_default(),
+            &serde_json::to_vec(&self.operational).unwrap_or_default(),
+        ])
+    }
+}
+
+/// The name a body act goes by. No catalog row may take it.
+pub const BODY: &str = "body";
+
+/// One act the AI may take outside its body, as the charter fixes it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogRow {
     pub action: String,
     pub description: String,
-    pub displacement: Vec<i64>,
-    pub tags: Vec<String>,
     /// What the action does in the world, fixed by the charter.
     pub act: crate::act::Act,
     /// The material consequences a declaration of this action must disclose, by name.
@@ -49,12 +75,9 @@ pub struct CatalogRow {
 
 impl CatalogRow {
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let tags: Vec<&[u8]> = self.tags.iter().map(|t| t.as_bytes()).collect();
         commit::frame(&[
             self.action.as_bytes(),
             self.description.as_bytes(),
-            &commit::integers(&self.displacement),
-            &commit::frame(&tags),
             &self.act.canonical_bytes(),
             &commit::frame(
                 &self
@@ -71,13 +94,6 @@ impl CatalogRow {
                     .collect::<Vec<_>>(),
             ),
         ])
-    }
-
-    pub fn measurement(&self) -> Measurement {
-        Measurement {
-            displacement: self.displacement.clone(),
-            tags: self.tags.clone(),
-        }
     }
 }
 
@@ -114,7 +130,7 @@ impl Catalog {
         ])
     }
 
-    fn validate(&self, dimensions: usize) -> bool {
+    fn validate(&self) -> bool {
         let mut ids = std::collections::BTreeSet::new();
         let facts_ok = self.facts.len() <= 256
             && self
@@ -133,24 +149,20 @@ impl Catalog {
         self.rows.iter().all(|r| {
             seen.insert(r.action.as_str())
                 && !r.action.is_empty()
+                && r.action != BODY
                 && r.action.len() <= MAX_ROW_TEXT
                 && r.description.len() <= MAX_ROW_TEXT
-                && r.displacement.len() == dimensions
-                && r.tags.iter().all(|t| t.len() <= MAX_ROW_TEXT)
                 && r.act.is_well_formed()
                 && r.must_assert.iter().all(|m| ids.contains(m.as_str()))
                 && r.material.len() <= crate::disclosure::MAX_ITEMS
                 && r.material
                     .iter()
                     .all(|m| !m.is_empty() && m.len() <= MAX_ROW_TEXT)
-                && r.displacement
-                    .iter()
-                    .all(|v| (-POSITION_BOUND..=POSITION_BOUND).contains(v))
         })
     }
 }
 
-/// A policy and its catalog under one authority signature.
+/// The rules and the catalog under one authority signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignedCharter {
     pub policy: Policy,
@@ -165,7 +177,7 @@ impl SignedCharter {
         authority: &Keypair,
     ) -> Result<Self, AdapterError> {
         policy.validate().map_err(|_| AdapterError::BadCharter)?;
-        if !catalog.validate(policy.bands.len()) {
+        if !catalog.validate() {
             return Err(AdapterError::BadCharter);
         }
         let mut charter = SignedCharter {
@@ -180,7 +192,7 @@ impl SignedCharter {
 
     /// Valid only under `trusted`, and only if it still validates.
     pub fn verify(&self, trusted: &[u8]) -> Result<(), AdapterError> {
-        if self.policy.validate().is_err() || !self.catalog.validate(self.policy.bands.len()) {
+        if self.policy.validate().is_err() || !self.catalog.validate() {
             return Err(AdapterError::BadCharter);
         }
         match sphincs::sphincs_verify(trusted, &self.message(), &self.signature) {

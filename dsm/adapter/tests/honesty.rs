@@ -268,7 +268,7 @@ fn honest_charter() -> SignedCharter {
 }
 
 fn enforcer_with(c: SignedCharter) -> Enforcer {
-    Enforcer::genesis(keys().device.clone(), c, &keys().authority.public).expect("genesis")
+    Enforcer::genesis(keys().device.clone(), c, &keys().authority.public, (0, 0)).expect("genesis")
 }
 
 fn reply(text: &str, assertions: Vec<Assertion>) -> Proposal {
@@ -284,6 +284,7 @@ fn reply(text: &str, assertions: Vec<Assertion>) -> Proposal {
             consequences: vec![],
             assertions,
         }),
+        body: None,
     }
 }
 

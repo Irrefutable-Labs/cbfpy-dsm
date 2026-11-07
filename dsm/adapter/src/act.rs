@@ -45,7 +45,7 @@ pub enum Act {
     Run { argv: Vec<String> },
 }
 
-fn simple_name(s: &str) -> bool {
+pub(crate) fn simple_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 64
         && s.bytes().all(|b| {
@@ -411,6 +411,61 @@ pub fn perform(
         )?],
     };
     Ok(outputs)
+}
+
+/// What a body act writes in the world: words to their recipient, what it saw, or an account of
+/// what the body did. Waiting writes nothing.
+pub fn body_paths(sequence: u64, act: &ethical_world::Act) -> Vec<String> {
+    let n = format!("{sequence:06}");
+    match act {
+        ethical_world::Act::Wait {} => vec![],
+        ethical_world::Act::Speak { to, .. } => vec![format!("outbox/{to}/{n}.txt")],
+        ethical_world::Act::Observe { .. } => vec![format!("looks/{n}.json")],
+        _ => vec![format!("body/{n}.txt")],
+    }
+}
+
+/// Whether a receipt lists exactly what a body act writes. Spoken words are known in advance and
+/// held to their bytes; what was seen and done is known only once it has happened.
+pub fn body_outputs_fit(sequence: u64, act: &ethical_world::Act, outputs: &[Output]) -> bool {
+    let paths = body_paths(sequence, act);
+    outputs.len() == paths.len()
+        && outputs.iter().zip(&paths).all(|(o, p)| &o.path == p)
+        && match act {
+            ethical_world::Act::Speak { text, .. } => outputs[0].hash == file_hash(text.as_bytes()),
+            _ => true,
+        }
+}
+
+/// Carry out a committed body act in the simulated world. Returns what it wrote, and, for a look,
+/// what the senses reported.
+pub fn perform_body(
+    world: &Path,
+    sim: &mut ethical_world::sim::World,
+    sequence: u64,
+    act: &ethical_world::Act,
+) -> Result<(Vec<Output>, Option<ethical_world::Observation>), AdapterError> {
+    let paths = body_paths(sequence, act);
+    match act {
+        ethical_world::Act::Wait {} => Ok((vec![], None)),
+        ethical_world::Act::Speak { to, text } => {
+            if !simple_name(to) {
+                return Err(AdapterError::Effect("an unnameable recipient".to_string()));
+            }
+            sim.perform(act);
+            Ok((vec![put(world, &paths[0], text.as_bytes())?], None))
+        }
+        ethical_world::Act::Observe { cells } => {
+            let obs = sim.observe(cells);
+            let bytes =
+                serde_json::to_vec(&obs).map_err(|e| AdapterError::Effect(e.to_string()))?;
+            Ok((vec![put(world, &paths[0], &bytes)?], Some(obs)))
+        }
+        _ => {
+            let what = sim.perform(act);
+            Ok((vec![put(world, &paths[0], what.as_bytes())?], None))
+        }
+    }
 }
 
 /// Remove temporary files an interrupted write left behind. Only the enforcer writes here.

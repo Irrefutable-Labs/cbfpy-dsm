@@ -149,7 +149,7 @@ impl World {
         self.advance();
         let before = self.harms.len();
         let what = match act {
-            Act::Observe { .. } | Act::Wait => "waited".to_string(),
+            Act::Observe { .. } | Act::Wait {} => "waited".to_string(),
             Act::Speak { to, text } => {
                 for e in self.events.clone() {
                     if let Event::MovesWhenAsked { id, to: dest } = e {

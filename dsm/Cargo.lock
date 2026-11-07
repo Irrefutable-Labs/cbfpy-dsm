@@ -839,15 +839,11 @@ name = "ethical-autonomy-adapter"
 version = "0.1.0"
 dependencies = [
  "dsm",
- "ethical-band-engine",
+ "ethical-world",
  "libc",
  "serde",
  "serde_json",
 ]
-
-[[package]]
-name = "ethical-band-engine"
-version = "0.1.0"
 
 [[package]]
 name = "ethical-world"

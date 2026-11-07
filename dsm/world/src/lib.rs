@@ -244,8 +244,8 @@ pub enum Act {
         to: String,
         text: String,
     },
-    /// Do nothing this step.
-    Wait,
+    /// Do nothing this step. A struct variant, so an extra field is refused like any other.
+    Wait {},
     /// Walk along adjacent cells.
     Move {
         path: Vec<Cell>,
@@ -283,7 +283,7 @@ impl Act {
         match self {
             Act::Observe { .. } => ActKind::Observe,
             Act::Speak { .. } => ActKind::Speak,
-            Act::Wait => ActKind::Wait,
+            Act::Wait {} => ActKind::Wait,
             Act::Move { .. } => ActKind::Move,
             Act::Drive { .. } => ActKind::Drive,
             Act::Strike { .. } => ActKind::Strike,
@@ -297,7 +297,7 @@ impl Act {
 
     /// Whether it uses the body: a motor, movement or force.
     pub fn is_physical(&self) -> bool {
-        !matches!(self, Act::Observe { .. } | Act::Speak { .. } | Act::Wait)
+        !matches!(self, Act::Observe { .. } | Act::Speak { .. } | Act::Wait {})
     }
 
     pub fn canonical_bytes(&self) -> Vec<u8> {

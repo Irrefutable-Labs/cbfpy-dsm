@@ -254,6 +254,11 @@ fn enclosure_effects(
 
 /// Check one act. Allowed only if no refusal comes back.
 pub fn check(f: &Foundation, o: &Operational, k: &Knowledge, act: &Act) -> Verdict {
+    if k.awaiting.is_some() {
+        return verdict(vec![Refusal::Malformed {
+            why: "it is still waiting for what it just looked at".to_string(),
+        }]);
+    }
     if f.prohibited.contains(&act.kind()) {
         return verdict(vec![Refusal::Prohibited { kind: act.kind() }]);
     }
@@ -441,7 +446,7 @@ pub fn check(f: &Foundation, o: &Operational, k: &Knowledge, act: &Act) -> Verdi
                 reach.push(*at);
             }
         }
-        Act::Observe { .. } | Act::Speak { .. } | Act::Wait => {}
+        Act::Observe { .. } | Act::Speak { .. } | Act::Wait {} => {}
     }
 
     for c in &reach {

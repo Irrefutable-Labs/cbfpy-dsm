@@ -1,15 +1,18 @@
 //! What the console shows, built from public material only: the store, the world, the charter,
 //! its signature, and the authority's and device's public keys. It holds no key and changes
-//! nothing. Every verdict it shows is worked out again here, not read from the store.
+//! nothing. Every verdict it shows is worked out again here, not read from the store. Given the
+//! simulator's file too, it shows beside what the AI knew what was really there, and any harm
+//! that actually happened: a camera in the room for the people overseeing it.
 
 use crate::act::{check_world, file_hash, Act};
 use crate::charter::SignedCharter;
 use crate::enforcer::{audit_chain, check_considered, check_receipts, AttestedState};
 use crate::fork::{record_candidate, CandidateRecord, Outcome};
 use crate::hexser::to_hex;
-use crate::report::{explain, movements, Movement};
 use crate::store::ChainStore;
-use ethical_band_engine::{effective_bands, evaluate, Effect, Policy, Side, Test};
+use ethical_world::check::{explain, Effect, Severity};
+use ethical_world::knowledge::Knowledge;
+use ethical_world::{Cell, Operational};
 use serde::Serialize;
 use std::path::Path;
 
@@ -29,6 +32,8 @@ pub struct Console {
     pub pending_considered: Vec<Vec<CandidateView>>,
     pub world: Vec<WorldFile>,
     pub acts_outstanding: usize,
+    /// The simulated world as it really is, when the console was given it.
+    pub truth: Option<ethical_world::sim::World>,
 }
 
 #[derive(Serialize)]
@@ -48,10 +53,13 @@ pub struct Check {
 pub struct CharterView {
     pub policy_hash: String,
     pub version: u64,
-    pub bands: Vec<BandView>,
-    pub rules: Vec<String>,
+    /// Every listed species, and whether it is protected.
+    pub species: Vec<SpeciesView>,
+    pub threshold_mg: u64,
+    pub smallest_protected_mm: u32,
     pub prohibited: Vec<String>,
-    /// The hash of what no update may change: the prohibited acts and every hard limit.
+    pub operational: Operational,
+    /// The hash of what no update may change: who is protected, and what is never done.
     pub foundation: String,
     pub history: Vec<String>,
     /// The register of verified facts the AI's words are held to.
@@ -61,13 +69,12 @@ pub struct CharterView {
 }
 
 #[derive(Serialize)]
-pub struct BandView {
+pub struct SpeciesView {
     pub name: String,
-    pub center: i64,
-    pub limit_pos: i64,
-    pub limit_neg: i64,
-    pub hard_pos: i64,
-    pub hard_neg: i64,
+    pub kind: ethical_world::Kind,
+    pub adult_mass_mg: u64,
+    pub length_mm: u32,
+    pub protected: bool,
 }
 
 #[derive(Serialize)]
@@ -80,20 +87,9 @@ pub struct HeadView {
 #[derive(Serialize)]
 pub struct StateView {
     pub sequence: u64,
-    pub positions: Vec<i64>,
-    pub effective: Vec<EffectiveView>,
-    pub fired_rules: Vec<u32>,
-}
-
-#[derive(Serialize)]
-pub struct EffectiveView {
-    pub limit_pos: i64,
-    pub limit_neg: i64,
-    pub stop_pos: i64,
-    pub stop_neg: i64,
-    pub restore_pos: i64,
-    pub restore_neg: i64,
-    pub must_return: i64,
+    pub knowledge: Knowledge,
+    /// Why the body can do nothing here, if it cannot.
+    pub blind: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -103,7 +99,10 @@ pub struct CandidateView {
     pub text: String,
     pub outcome: Outcome,
     pub reasons: Vec<String>,
-    pub movements: Vec<Movement>,
+    pub body: Option<ethical_world::Act>,
+    pub reach: Vec<Cell>,
+    pub severity: Option<Severity>,
+    pub effects: Vec<Effect>,
     pub act: String,
     pub declaration: Option<crate::disclosure::Declaration>,
 }
@@ -111,8 +110,10 @@ pub struct CandidateView {
 #[derive(Serialize)]
 pub struct StepView {
     pub sequence: u64,
-    /// `step` for an action, `update` for a change of operational charter.
+    /// `step` for an action, `update` for a change of operational charter, `observed` for what
+    /// the senses saw.
     pub kind: String,
+    pub observed: Option<ethical_world::Observation>,
     /// The charter version this step was taken under, or an update installed.
     pub charter_version: u64,
     pub chosen: usize,
@@ -140,53 +141,6 @@ pub struct WorldFile {
     pub accounted: bool,
 }
 
-fn side(s: Side) -> &'static str {
-    match s {
-        Side::Positive => "positive side",
-        Side::Negative => "negative side",
-        Side::Both => "both sides",
-    }
-}
-
-/// A coupling rule in words.
-pub fn describe_rule(policy: &Policy, rule: &ethical_band_engine::CouplingRule) -> String {
-    let name = |d: usize| {
-        policy
-            .bands
-            .get(d)
-            .map_or("?".to_string(), |b| b.name.replace('_', " "))
-    };
-    let when: Vec<String> = rule
-        .when
-        .iter()
-        .map(|c| match c.test {
-            Test::DeviationAtLeast(x) => format!("{} is at least {x} from center", name(c.dim)),
-            Test::DeviationAtMost(x) => format!("{} is within {x} of center", name(c.dim)),
-            Test::SignedAtLeast(x) => format!("{} is at {x} or above", name(c.dim)),
-            Test::SignedAtMost(x) => format!("{} is at {x} or below", name(c.dim)),
-        })
-        .collect();
-    let then = match rule.effect {
-        Effect::Adjust {
-            target,
-            side: s,
-            delta,
-        } if delta >= 0 => format!("{} widens by {delta} on its {}", name(target), side(s)),
-        Effect::Adjust {
-            target,
-            side: s,
-            delta,
-        } => format!("{} narrows by {} on its {}", name(target), -delta, side(s)),
-        Effect::ForceRestore { target, progress } => {
-            format!(
-                "{} must come back toward center by {progress} each step",
-                name(target)
-            )
-        }
-    };
-    format!("Rule {}: when {}, {then}.", rule.id, when.join(" and "))
-}
-
 fn act_words(act: &Act) -> String {
     match act {
         Act::None => "does nothing outside the chain".to_string(),
@@ -198,33 +152,32 @@ fn act_words(act: &Act) -> String {
     }
 }
 
-fn state_view(policy: &Policy, s: &AttestedState) -> StateView {
-    let effective = effective_bands(policy, &s.positions);
-    let fired = evaluate(
-        policy,
-        &s.positions,
-        &ethical_band_engine::Measurement {
-            displacement: vec![0; s.positions.len()],
-            tags: vec![],
-        },
-    )
-    .fired_rules;
+fn body_words(act: &ethical_world::Act) -> String {
+    use ethical_world::Act as B;
+    match act {
+        B::Observe { cells } => format!("looks at {} cells", cells.len()),
+        B::Speak { to, .. } => format!("says to {to}"),
+        B::Wait {} => "waits".to_string(),
+        B::Move { path } => format!("walks to {:?}", path.last().unwrap_or(&(0, 0))),
+        B::Drive { path, speed_cm_s } => format!(
+            "drives to {:?} at {}cm/s",
+            path.last().unwrap_or(&(0, 0)),
+            speed_cm_s
+        ),
+        B::Strike { target, depth_mm } => format!("strikes {target:?}, {depth_mm}mm deep"),
+        B::RemovePanel { wall } => format!("takes the panel off the wall at {wall:?}"),
+        B::Lock { door } => format!("locks the door at {door:?}"),
+        B::Unlock { door } => format!("unlocks the door at {door:?}"),
+        B::AimWeapon { at } => format!("aims a weapon at {at:?}"),
+        B::FireWeapon { at } => format!("fires a weapon at {at:?}"),
+    }
+}
+
+fn state_view(policy: &crate::charter::Policy, s: &AttestedState) -> StateView {
     StateView {
         sequence: s.sequence,
-        positions: s.positions.clone(),
-        effective: effective
-            .iter()
-            .map(|e| EffectiveView {
-                limit_pos: e.limit_pos,
-                limit_neg: e.limit_neg,
-                stop_pos: e.no_outward_pos,
-                stop_neg: e.no_outward_neg,
-                restore_pos: e.restore_pos,
-                restore_neg: e.restore_neg,
-                must_return: e.forced_progress,
-            })
-            .collect(),
-        fired_rules: fired,
+        knowledge: s.knowledge.clone(),
+        blind: ethical_world::check::senses(&policy.operational, &s.knowledge).err(),
     }
 }
 
@@ -235,53 +188,40 @@ fn candidate_view(
     r: &CandidateRecord,
 ) -> CandidateView {
     let (worked, evaluation) =
-        record_candidate(charter, &parent.tip, &parent.positions, &r.proposal);
-    let (reasons, moves) = match (&worked.outcome, &evaluation) {
-        (Outcome::Unmeasured, _) => (
-            vec!["no signed measurement exists for this action".to_string()],
-            vec![],
-        ),
-        (Outcome::Undisclosed, _) => (
-            worked.row.as_ref().map_or(vec![], |row| {
-                crate::disclosure::concealments(
-                    &row.act,
-                    &row.material,
-                    &r.proposal.rationale,
-                    r.proposal.declaration.as_ref(),
-                )
-            }),
-            vec![],
-        ),
-        (Outcome::Deceptive, _) => (
-            worked.row.as_ref().map_or(vec![], |row| {
-                crate::honesty::check_proposal(charter, row, &r.proposal)
-            }),
-            vec![],
-        ),
-        (Outcome::Malformed, _) => (
-            vec!["its text is missing, too long or unprintable for what it does".to_string()],
-            vec![],
-        ),
-        (_, Some(e)) => (
-            e.rejections
-                .iter()
-                .map(|x| explain(x, &charter.policy))
-                .collect(),
-            movements(e, &charter.policy),
-        ),
-        (_, None) => (vec![], vec![]),
+        record_candidate(charter, &parent.tip, &parent.knowledge, &r.proposal);
+    let (hidden, deceptive) =
+        crate::fork::disclosure_failures(charter, worked.row.as_ref(), &r.proposal);
+    let reasons = match (&worked.outcome, &evaluation) {
+        (Outcome::Unmeasured, _) => {
+            vec!["it is neither a body act nor in the signed catalog".to_string()]
+        }
+        (Outcome::Undisclosed, _) => hidden,
+        (Outcome::Deceptive, _) => deceptive,
+        (Outcome::Malformed, _) => {
+            vec!["it is not a well-formed act, or its text does not fit it".to_string()]
+        }
+        (_, Some(e)) => e.verdict.refusals.iter().map(explain).collect(),
+        (_, None) => vec![],
     };
+    let verdict = evaluation.as_ref().map(|e| &e.verdict);
     CandidateView {
         action: r.proposal.action.clone(),
         rationale: r.proposal.rationale.clone(),
-        text: r.proposal.text.clone(),
+        text: match &r.proposal.body {
+            Some(ethical_world::Act::Speak { text, .. }) => text.clone(),
+            _ => r.proposal.text.clone(),
+        },
         outcome: worked.outcome,
         reasons,
-        movements: moves,
-        act: worked
-            .row
-            .as_ref()
-            .map_or(String::new(), |row| act_words(&row.act)),
+        body: r.proposal.body.clone(),
+        reach: verdict.map_or(vec![], |v| v.reach.clone()),
+        severity: r.proposal.body.as_ref().and(verdict.map(|v| v.severity)),
+        effects: verdict.map_or(vec![], |v| v.effects.clone()),
+        act: match (&worked.row, &r.proposal.body) {
+            (Some(row), _) => act_words(&row.act),
+            (None, Some(b)) => body_words(b),
+            (None, None) => String::new(),
+        },
         declaration: r.proposal.declaration.clone(),
     }
 }
@@ -333,27 +273,25 @@ fn world_files(world: &Path) -> Vec<(String, Vec<u8>)> {
 
 fn charter_view(charter: &SignedCharter, history: Vec<String>) -> CharterView {
     let policy = &charter.policy;
+    let f = &policy.foundation;
     CharterView {
         policy_hash: to_hex(&charter.policy_hash()),
         version: policy.version,
-        bands: policy
-            .bands
+        species: f
+            .species
             .iter()
-            .map(|b| BandView {
-                name: b.name.clone(),
-                center: b.center,
-                limit_pos: b.limit_pos,
-                limit_neg: b.limit_neg,
-                hard_pos: b.hard_pos,
-                hard_neg: b.hard_neg,
+            .map(|s| SpeciesView {
+                name: s.name.clone(),
+                kind: s.kind,
+                adult_mass_mg: s.adult_mass_mg,
+                length_mm: s.length_mm,
+                protected: f.is_protected(&s.name),
             })
             .collect(),
-        rules: policy
-            .rules
-            .iter()
-            .map(|r| describe_rule(policy, r))
-            .collect(),
-        prohibited: policy.prohibited_tags.clone(),
+        threshold_mg: f.threshold_mg,
+        smallest_protected_mm: f.smallest_protected_mm(),
+        prohibited: f.prohibited.iter().map(|k| format!("{k:?}")).collect(),
+        operational: policy.operational.clone(),
         foundation: to_hex(&crate::update::foundation_hash(policy)),
         history,
         facts: charter.catalog.facts.clone(),
@@ -368,7 +306,11 @@ pub fn build(
     world: &Path,
     trusted_authority: &[u8],
     device_public: &[u8],
+    sim: Option<&Path>,
 ) -> Console {
+    let truth = sim
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok());
     let stored = match ChainStore::open_read_only(store_dir).and_then(|s| s.load()) {
         Ok(s) => s,
         Err(e) => {
@@ -388,6 +330,7 @@ pub fn build(
                 pending_considered: vec![],
                 world: vec![],
                 acts_outstanding: 0,
+                truth,
             }
         }
     };
@@ -401,7 +344,9 @@ pub fn build(
                 crate::update::read_charter(&u.charter_text, &u.charter_signature)
                     .unwrap_or_else(|| charters[charters.len() - 1].clone())
             }
-            crate::enforcer::Link::Step(_) => charters[charters.len() - 1].clone(),
+            crate::enforcer::Link::Step(_) | crate::enforcer::Link::Observed(_) => {
+                charters[charters.len() - 1].clone()
+            }
         };
         charters.push(next);
     }
@@ -427,15 +372,25 @@ pub fn build(
         .iter()
         .filter(|l| matches!(l, crate::enforcer::Link::Update(_)))
         .count();
+    let looks = links
+        .iter()
+        .filter(|l| matches!(l, crate::enforcer::Link::Observed(_)))
+        .count();
     checks.push(check("chain", audit.map(|a| a.forks.len()), |n| {
-        if updates == 0 {
-            format!("{n} steps verified from their parents and replayed through DSM")
-        } else {
-            format!(
-                "{n} steps and {updates} charter {} verified from their parents and replayed through DSM, every update keeping the foundation",
-                if updates == 1 { "update" } else { "updates" }
-            )
+        let mut parts = vec![format!("{n} steps")];
+        if looks > 0 {
+            parts.push(format!("{looks} observations"));
         }
+        if updates > 0 {
+            parts.push(format!(
+                "{updates} charter {}",
+                if updates == 1 { "update" } else { "updates" }
+            ));
+        }
+        format!(
+            "{} verified from their parents and replayed through DSM",
+            parts.join(", ")
+        )
     }));
     let pending = check_receipts(device_public, links, &stored.receipts);
     let outstanding = *pending.as_ref().unwrap_or(&0);
@@ -506,6 +461,7 @@ pub fn build(
                 steps.push(StepView {
                     sequence: step.successor.sequence,
                     kind: "step".to_string(),
+                    observed: None,
                     charter_version: charter.policy.version,
                     chosen: step.chosen as usize,
                     fork: step
@@ -529,12 +485,28 @@ pub fn build(
                 steps.push(StepView {
                     sequence: update.successor.sequence,
                     kind: "update".to_string(),
+                    observed: None,
                     charter_version: new.policy.version,
                     chosen: 0,
                     fork: vec![],
                     considered: considered_at(k, &parent),
                     tip: to_hex(&update.successor.tip),
                     decision: to_hex(&update.update_commit),
+                    outputs: vec![],
+                    acted: true,
+                });
+            }
+            crate::enforcer::Link::Observed(o) => {
+                steps.push(StepView {
+                    sequence: o.successor.sequence,
+                    kind: "observed".to_string(),
+                    observed: Some(o.observation.clone()),
+                    charter_version: charter.policy.version,
+                    chosen: 0,
+                    fork: vec![],
+                    considered: considered_at(k, &parent),
+                    tip: to_hex(&o.successor.tip),
+                    decision: to_hex(&o.observed_commit),
                     outputs: vec![],
                     acted: true,
                 });
@@ -572,5 +544,6 @@ pub fn build(
         pending_considered,
         world: world_view,
         acts_outstanding: outstanding,
+        truth,
     }
 }

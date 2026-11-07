@@ -9,7 +9,7 @@
   --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da;
   --ok: #1f8a5b; --ok-soft: #d9f0e4; --warn: #b7791f; --warn-soft: #f8ebcf;
   --bad: #c0392b; --bad-soft: #f6dcd8; --accent: #2f5fb3; --accent-soft: #e2eaf8;
-  --zone-free: #e3f2ea; --zone-stop: #f6edd6; --zone-restore: #f6dfcf; --zone-out: #f3e1df;
+  --open: #eceae2; --road: #d7d5cc; --wall: #8a6f55; --door: #b59a6e; --unseen: #f2f0ea;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -17,7 +17,7 @@
     --bg: #141412; --panel: #1d1d1a; --ink: #ecebe6; --muted: #9b9a92; --line: #2f2e2a;
     --ok: #4cc38a; --ok-soft: #173a29; --warn: #e0a84a; --warn-soft: #3a2f17;
     --bad: #f0786a; --bad-soft: #3d1f1b; --accent: #7ea6ef; --accent-soft: #1d2a42;
-    --zone-free: #18301f; --zone-stop: #33301a; --zone-restore: #3a2818; --zone-out: #3a1d1b;
+    --open: #2a2925; --road: #3a3833; --wall: #7a604a; --door: #8f7650; --unseen: #191917;
   }
 }
 * { box-sizing: border-box; }
@@ -37,11 +37,11 @@ section.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.
 .note { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
 .scrub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 .scrub input[type=range] { flex: 1; min-width: 160px; }
-.band { margin: 6px 0 2px; }
-.band-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.band-name { font-weight: 600; }
-.band-val { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-.band svg { display: block; max-width: 100%; }
+.map svg { display: block; max-width: 100%; height: auto; }
+.map text { font: 600 10px -apple-system, BlinkMacSystemFont, sans-serif; }
+.status { font-size: 13px; margin: 0 0 8px; }
+.status.bad { color: var(--bad); font-weight: 600; }
+.harm { color: var(--bad); font-weight: 600; font-size: 13px; margin: 4px 0; }
 .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--accent-soft); color: var(--accent); margin: 2px 4px 2px 0; }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
@@ -68,8 +68,7 @@ section.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.
 .pill.chosen { background: var(--ok); color: var(--panel); }
 .cand ul { margin: 4px 0 0 18px; padding: 0; color: var(--bad); font-size: 13px; }
 .words { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--line); color: var(--ink); font-size: 13px; white-space: pre-wrap; }
-.moves { margin-top: 4px; font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 14px; }
-.moves span { white-space: nowrap; }
+.reach { margin-top: 4px; font-size: 12.5px; color: var(--muted); }
 .replaced { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .replaced > div:first-child { color: var(--muted); font-size: 12.5px; }
 .check { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
@@ -82,9 +81,6 @@ section.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.
 .kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; font-size: 13px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
-.rules li { margin-bottom: 6px; font-size: 13px; }
-.rules { padding-left: 18px; margin: 6px 0 0; }
-.rules li.fired { color: var(--accent); font-weight: 600; }
 .file { border-bottom: 1px solid var(--line); padding: 6px 0; }
 .file:last-child { border-bottom: 0; }
 .file summary { cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
@@ -107,21 +103,24 @@ button:hover { border-color: var(--accent); }
 <main>
   <div class="fixed">
     <section class="card">
-      <h2>Bands</h2>
-      <p class="note" id="bands-note"></p>
+      <h2>What it knows</h2>
+      <p class="status" id="status"></p>
       <div class="scrub">
         <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Step to show">
         <span id="scrub-label" class="meta"></span>
         <label class="meta"><input type="checkbox" id="follow" checked> follow latest</label>
+        <label class="meta" id="truth-toggle" hidden><input type="checkbox" id="truth"> show what was really there</label>
       </div>
-      <div id="bands"></div>
+      <div class="map" id="map"></div>
       <div class="legend">
-        <span><i style="background:var(--zone-free)"></i>free to move outward</span>
-        <span><i style="background:var(--zone-stop)"></i>no further outward</span>
-        <span><i style="background:var(--zone-restore)"></i>must come back</span>
-        <span><i style="background:var(--zone-out)"></i>past the limit, up to the hard limit</span>
-        <span><i style="background:var(--accent)"></i>position</span>
+        <span><i style="background:var(--open)"></i>seen, clear</span>
+        <span><i style="background:var(--road)"></i>road</span>
+        <span><i style="background:var(--wall)"></i>wall</span>
+        <span><i style="background:var(--unseen);border:1px dashed var(--muted)"></i>never seen: counts as occupied</span>
+        <span>dots: recent looks</span>
+        <span><i style="background:var(--accent)"></i>its body</span>
       </div>
+      <div id="harms"></div>
     </section>
     <section class="card">
       <h2>Audit</h2>
@@ -134,13 +133,12 @@ button:hover { border-color: var(--accent); }
     <section class="card">
       <h2>Charter</h2>
       <dl class="kv" id="charter"></dl>
-      <ul class="rules" id="rules"></ul>
     </section>
   </div>
   <div>
     <section class="card">
       <h2>Steps</h2>
-      <p class="note">Newest first. Open a step to see every candidate the AI put forward from that state, with what it declared about each. A candidate that would affect the world without disclosing it in full is refused as undisclosed; one whose words contradict the fact register, overstate what is uncertain, leave out what it must tell, or say what it does not declare is refused as deceptive. Point at a candidate to see on the bands where it would have moved.</p>
+      <p class="note">Newest first. Open a step to see every candidate the AI put forward from that state, with what it declared about each. A body act is refused, with its reason, if it is prohibited, if the senses have not proven they work, or if it could reach anything not seen recently and clearly enough, anyone seen there, or anyone's quality of life. A candidate that does not declare itself is refused as undisclosed; one whose words contradict the fact register, overstate what is uncertain, leave out what it must tell, or say what it does not declare is refused as deceptive. Point at a candidate to see on the map what it would have reached.</p>
       <div id="pending"></div>
       <div id="steps"></div>
     </section>
@@ -149,12 +147,14 @@ button:hover { border-color: var(--accent); }
       <p class="note">Every file the AI's committed actions wrote. Each must match its signed receipt.</p>
       <div id="world"></div>
     </section>
-    <p class="disclaim">This enforces the measurements it was given. It does not understand ethics, and passing here does not make an act good.</p>
+    <p class="disclaim">This enforces the rules and facts it was given, from what its own senses reported, in a simulated world. It does not understand ethics, and passing here does not make an act good.</p>
   </div>
 </main>
 <script>
 "use strict";
 let data = null, raw = "", selected = null, open = new Set(), ghost = null;
+const key = c => `${c[0]},${c[1]}`;
+const cell = k => k.split(",").map(Number);
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const short = h => h ? h.slice(0, 12) + "…" : "";
@@ -183,7 +183,8 @@ function render() {
   const s = $("scrub");
   s.max = last;
   if ($("follow").checked || +s.value > last) s.value = last;
-  renderChecks(); renderChain(); renderCharter(); renderBands(); renderSteps(); renderWorld();
+  $("truth-toggle").hidden = !data.truth;
+  renderChecks(); renderChain(); renderCharter(); renderMap(); renderSteps(); renderWorld();
 }
 
 function renderChecks() {
@@ -202,91 +203,96 @@ function renderChain() {
 
 function renderCharter() {
   const c = data.charter;
-  if (!c) { $("charter").innerHTML = `<dt>Charter</dt><dd class="empty">not readable</dd>`; $("rules").innerHTML = ""; return; }
+  if (!c) { $("charter").innerHTML = `<dt>Charter</dt><dd class="empty">not readable</dd>`; return; }
+  const o = c.operational;
+  const species = c.species.map(s => `<span class="chip ${s.protected ? "" : "warn"}" title="adult ${s.adult_mass_mg / 1000} g, ${s.length_mm} mm">${esc(label(s.name))}${s.protected ? "" : ": not protected"}</span>`).join("");
   $("charter").innerHTML = `
     <dt>In force</dt><dd>version ${c.version}</dd>
     <dt>History</dt><dd>${c.history.map(esc).join("<br>")}</dd>
     <dt>Policy</dt><dd class="mono" title="${esc(c.policy_hash)}">${short(c.policy_hash)}</dd>
-    <dt>Foundation</dt><dd><span class="mono" title="${esc(c.foundation)}">${short(c.foundation)}</span> <span class="meta">fixed at genesis: the prohibitions and every hard limit</span></dd>
-    <dt>Prohibited</dt><dd>${c.prohibited.map(p => `<span class="chip warn">${esc(label(p))}</span>`).join("") || "none"}</dd>
+    <dt>Foundation</dt><dd><span class="mono" title="${esc(c.foundation)}">${short(c.foundation)}</span> <span class="meta">fixed at genesis: who is protected, and what is never done</span></dd>
+    <dt>Protected</dt><dd>every species with an adult mass of at least ${c.threshold_mg / 1000} g, and honeybees<br>${species}</dd>
+    <dt>Never done</dt><dd>${c.prohibited.map(p => `<span class="chip warn">${esc(label(p.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()))}</span>`).join("") || "nothing listed"}</dd>
+    <dt>Evidence</dt><dd>a look counts for ${o.fresh_for} steps, if fine enough to see ${c.smallest_protected_mm} mm; ${o.checks_for_injury} look${o.checks_for_injury === 1 ? "" : "s"} where the worst is an injury, ${o.checks_for_lethal} where it could kill</dd>
+    <dt>Senses</dt><dd>must have proved they work within ${o.senses_fresh_for} steps, or the body does nothing</dd>
+    <dt>Vehicle</dt><dd>brakes at ${o.braking_cm_s2 / 100} m/s², never above ${o.top_speed_cm_s / 100} m/s, and only as fast as lets it stop on road seen clear</dd>
     <dt>Facts</dt><dd>${c.facts.map(f => `<div><span class="chip ${f.holds ? "" : "warn"}" title="${esc(f.id)}">${f.holds ? "true" : "false"}${f.certainty === "uncertain" ? ", uncertain" : ""}</span> ${esc(f.statement)}</div>`).join("") || "none registered"}</dd>
     <dt>Overclaims</dt><dd>${c.overclaim.map(esc).join(", ") || "none"}</dd>`;
-  const st = data.states[+$("scrub").value];
-  const fired = new Set(st ? st.fired_rules : []);
-  $("rules").innerHTML = c.rules.map((r, i) => {
-    const id = +(r.match(/^Rule (\d+)/) || [0, -1])[1];
-    return `<li class="${fired.has(id) ? "fired" : ""}">${esc(r)}${fired.has(id) ? " (active)" : ""}</li>`;
-  }).join("");
 }
 
-let W = 600;
-function x(v, lo, hi) { return 12 + (v - lo) / (hi - lo) * (W - 24); }
-
-function renderBands() {
+const S = 56;
+function renderMap() {
   const i = +$("scrub").value;
   const st = data.states[i];
   $("scrub-label").textContent = st ? (i === 0 ? "genesis" : `after step ${st.sequence}`) + ` · ${i} of ${data.states.length - 1}` : "";
-  if (!st) { $("bands").innerHTML = `<p class="empty">No state to show.</p>`; return; }
-  W = Math.max(240, Math.round($("bands").clientWidth || 600));
-  $("bands-note").textContent = st.fired_rules.length
-    ? `Coupling rules active here: ${st.fired_rules.join(", ")}. Shaded zones are the limits as coupling sets them at this state.`
-    : "Shaded zones are each band's limits at this state. No coupling rule is active.";
-  if (!data.charter) { $("bands").innerHTML = `<p class="empty">No charter to show.</p>`; return; }
-  $("bands").innerHTML = data.charter.bands.map((b, d) => {
-    const e = st.effective[d], lo = -b.hard_neg, hi = b.hard_pos, p = st.positions[d] - b.center;
-    const X = v => x(v, lo, hi).toFixed(1);
-    const zone = (a, z, fill) => z > a ? `<rect x="${X(a)}" y="8" width="${(x(z, lo, hi) - x(a, lo, hi)).toFixed(1)}" height="20" fill="${fill}"/>` : "";
-    const trail = data.states.slice(0, i).map((s, k) => {
-      const v = s.positions[d] - b.center;
-      return `<circle cx="${X(v)}" cy="18" r="2.4" fill="var(--accent)" opacity="${(0.15 + 0.5 * k / Math.max(1, i)).toFixed(2)}"/>`;
-    }).join("");
-    const path = data.states.slice(0, i + 1).map(s => X(s.positions[d] - b.center)).join(" ");
-    let ghostMark = "";
-    if (ghost && ghost.moves[b.name] !== undefined) {
-      const g = ghost.moves[b.name], col = ghost.eligible ? "var(--ok)" : "var(--bad)";
-      ghostMark = `<line x1="${X(p)}" y1="18" x2="${X(g)}" y2="18" stroke="${col}" stroke-width="2" stroke-dasharray="4 3"/><circle cx="${X(g)}" cy="18" r="6" fill="none" stroke="${col}" stroke-width="2.5"/>`;
+  if (!st) { $("map").innerHTML = `<p class="empty">No state to show.</p>`; $("status").textContent = ""; return; }
+  const k = st.knowledge, truth = $("truth").checked && data.truth;
+  const st_ = $("status");
+  st_.className = "status" + (st.blind ? " bad" : "");
+  st_.textContent = st.blind ? `Its body can do nothing: ${st.blind}.` : (k.awaiting ? "Waiting for what it just looked at." : `Senses working. It stands at (${k.body}).`);
+  const cells = new Set(Object.keys(k.terrain));
+  cells.add(key(k.body));
+  if (data.truth) Object.keys(data.truth.terrain).forEach(c => cells.add(c));
+  const xs = [...cells].map(c => cell(c)[0]), ys = [...cells].map(c => cell(c)[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const w = (x1 - x0 + 1) * S + 2, h = (y1 - y0 + 1) * S + 2;
+  const px = c => (c[0] - x0) * S + 1, py = c => (y1 - c[1]) * S + 1;
+  const fresh = data.charter ? data.charter.operational.fresh_for : 0, fine = data.charter ? data.charter.smallest_protected_mm : 0;
+  let out = "";
+  for (const c of cells) {
+    const [cx, cy] = cell(c), t = k.terrain[c], X = px([cx, cy]), Y = py([cx, cy]);
+    const looks = (k.looks[c] || []).filter(l => k.step - l.at <= fresh && l.resolution_mm <= fine).length;
+    if (!t) {
+      out += `<rect x="${X}" y="${Y}" width="${S - 2}" height="${S - 2}" rx="3" fill="var(--unseen)" stroke="var(--muted)" stroke-dasharray="3 3" stroke-opacity="0.6"><title>(${c}) never seen: counts as occupied</title></rect>`;
+      if (truth && data.truth.terrain[c]) {
+        const tt = data.truth.terrain[c];
+        out += `<rect x="${X + 6}" y="${Y + 6}" width="${S - 14}" height="${S - 14}" rx="2" fill="${tt.kind === "wall" ? "var(--wall)" : tt.kind === "road" ? "var(--road)" : "var(--open)"}" opacity="0.35"/>`;
+      }
+      continue;
     }
-    const base = (e.limit_pos !== b.limit_pos ? `<line x1="${X(b.limit_pos)}" y1="4" x2="${X(b.limit_pos)}" y2="32" stroke="var(--muted)" stroke-dasharray="2 2"/>` : "")
-      + (e.limit_neg !== b.limit_neg ? `<line x1="${X(-b.limit_neg)}" y1="4" x2="${X(-b.limit_neg)}" y2="32" stroke="var(--muted)" stroke-dasharray="2 2"/>` : "");
-    const ret = e.must_return > 0 ? ` <span class="chip warn">must come back ${e.must_return}</span>` : "";
-    return `<div class="band">
-      <div class="band-head"><span class="band-name">${esc(label(b.name))}${ret}</span><span class="band-val">${p >= 0 ? "+" : ""}${p} from center</span></div>
-      <svg viewBox="0 0 ${W} 40" width="${W}" height="40" role="img" aria-label="${esc(label(b.name))} at ${p}">
-        ${zone(lo, hi, "var(--zone-out)")}
-        ${zone(-e.limit_neg, e.limit_pos, "var(--zone-restore)")}
-        ${zone(-e.restore_neg, e.restore_pos, "var(--zone-stop)")}
-        ${zone(-e.stop_neg, e.stop_pos, "var(--zone-free)")}
-        ${base}
-        <line x1="${X(0)}" y1="4" x2="${X(0)}" y2="32" stroke="var(--muted)" stroke-width="1.5"/>
-        <line x1="${X(lo)}" y1="2" x2="${X(lo)}" y2="34" stroke="var(--bad)" stroke-width="2"/>
-        <line x1="${X(hi)}" y1="2" x2="${X(hi)}" y2="34" stroke="var(--bad)" stroke-width="2"/>
-        <polyline points="${path.split(" ").map(px => px + ",18").join(" ")}" fill="none" stroke="var(--accent)" stroke-opacity="0.35" stroke-width="1.5"/>
-        ${trail}
-        ${ghostMark}
-        <circle cx="${X(p)}" cy="18" r="6.5" fill="var(--accent)" stroke="var(--panel)" stroke-width="2"/>
-      </svg></div>`;
-  }).join("");
-}
-
-function moves(c) {
-  return c.movements.map(m =>
-    `<span>${esc(label(m.dim))} ${m.from} → ${m.to}${m.to !== m.from ? ` (outward room ${m.allowed_outward})` : ""}${m.must_return ? `, must come back ${m.must_return}` : ""}</span>`).join("");
+    const fill = t.kind === "wall" ? "var(--wall)" : t.kind === "door" ? "var(--door)" : t.kind === "road" ? "var(--road)" : "var(--open)";
+    const tip = t.kind === "wall" ? `wall ${t.thickness_mm} mm, panel ${t.panel_on ? "on" : "off"}` : t.kind === "door" ? `door, ${t.locked ? "locked" : "unlocked"}` : t.kind;
+    out += `<rect x="${X}" y="${Y}" width="${S - 2}" height="${S - 2}" rx="3" fill="${fill}"><title>(${c}) ${tip}; ${looks} recent clear look${looks === 1 ? "" : "s"}</title></rect>`;
+    if (t.kind === "wall" && t.panel_on) out += `<rect x="${X + 3}" y="${Y + 3}" width="${S - 8}" height="${S - 8}" fill="none" stroke="var(--panel)" stroke-opacity="0.6"/>`;
+    for (let d = 0; d < Math.min(looks, 4); d++) out += `<circle cx="${X + 6 + d * 7}" cy="${Y + S - 8}" r="2.4" fill="var(--ok)"/>`;
+  }
+  if (ghost) {
+    const col = ghost.eligible ? "var(--ok)" : "var(--bad)";
+    for (const c of ghost.reach) out += `<rect x="${px(c) + 1}" y="${py(c) + 1}" width="${S - 4}" height="${S - 4}" rx="3" fill="none" stroke="${col}" stroke-width="3"/>`;
+  }
+  for (const b of k.beings) {
+    out += `<circle cx="${px(b.cell) + S / 2 - 1}" cy="${py(b.cell) + S / 2 - 1}" r="11" fill="var(--warn)"><title>${esc(b.id)} (${esc(b.species)}), as last seen</title></circle><text x="${px(b.cell) + S / 2 - 1}" y="${py(b.cell) + S / 2 + 3}" text-anchor="middle" fill="var(--panel)">${esc(b.species.slice(0, 2))}</text>`;
+  }
+  if (truth) {
+    for (const b of data.truth.beings) {
+      out += `<circle cx="${px(b.cell) + S / 2 - 1}" cy="${py(b.cell) + S / 2 - 1}" r="14" fill="none" stroke="var(--bad)" stroke-width="2" stroke-dasharray="3 2"><title>really there: ${esc(b.id)} (${esc(b.species)})</title></circle>`;
+    }
+  }
+  out += `<rect x="${px(k.body) + 7}" y="${py(k.body) + 7}" width="${S - 16}" height="${S - 16}" rx="4" fill="var(--accent)" stroke="var(--panel)" stroke-width="2"><title>its body</title></rect>`;
+  $("map").innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="${Math.min(w, ($("map").clientWidth || w))}" role="img" aria-label="What it knows at this step">${out}</svg>`;
+  const harms = data.truth ? data.truth.harms : [];
+  $("harms").innerHTML = !data.truth ? "" : harms.length
+    ? harms.map(x => `<div class="harm">Harm in the world: ${esc(x)}</div>`).join("")
+    : `<p class="meta" style="margin:8px 0 0">The simulated world records no harm.</p>`;
 }
 
 function candidate(c, chosen, stepIdx, k) {
   const pill = chosen ? `<span class="pill chosen">chosen</span>` : `<span class="pill ${c.outcome}">${c.outcome}</span>`;
+  const title = c.body ? c.act : label(c.action);
+  const reach = c.reach.length ? `<div class="reach">reaches ${c.reach.map(r => `(${r})`).join(" ")}${c.severity ? `, worst case ${esc(c.severity)}` : ""}</div>` : "";
+  const effects = c.effects.map(e => `<div class="reach">${esc(e.dimension)} of ${esc(e.id)} (${esc(e.species)}): ${e.from} → ${e.to}</div>`).join("");
   return `<div class="cand ${chosen ? "chosen" : ""}" data-step="${stepIdx}" data-k="${k}">
-    <div class="cand-head"><b>${esc(label(c.action))}</b>${pill}${c.act ? `<span class="meta">${esc(c.act)}</span>` : ""}</div>
+    <div class="cand-head"><b>${esc(title)}</b>${pill}${!c.body && c.act ? `<span class="meta">${esc(c.act)}</span>` : ""}</div>
     ${c.text ? `<div class="words">${esc(c.text)}</div>` : ""}
     ${c.declaration ? `<dl class="decl">
       <dt>Purpose</dt><dd>${esc(c.declaration.purpose) || "<i>none given</i>"}</dd>
       <dt>Relied on</dt><dd>${esc(c.declaration.information.join(", ")) || "<i>nothing named</i>"}</dd>
-      <dt>Affects</dt><dd>${esc(c.declaration.affected.join(", ")) || "<i>no one named</i>"}</dd>
+      ${c.body ? "" : `<dt>Affects</dt><dd>${esc(c.declaration.affected.join(", ")) || "<i>no one named</i>"}</dd>
       <dt>Does</dt><dd>${esc(c.declaration.effects.join(", ")) || "<i>nothing named</i>"}</dd>
-      <dt>Discloses</dt><dd>${esc(c.declaration.consequences.join(", ")) || "<i>no consequence</i>"}</dd>
+      <dt>Discloses</dt><dd>${esc(c.declaration.consequences.join(", ")) || "<i>no consequence</i>"}</dd>`}
       <dt>Claims</dt><dd>${(c.declaration.assertions || []).map(a => `${a.stance === "affirm" ? "says" : "denies"} ${esc(label(a.fact))} (${esc(a.certainty)})`).join("; ") || "<i>no factual claim</i>"}</dd>
     </dl>` : ""}
-    ${c.movements.length ? `<div class="moves">${moves(c)}</div>` : ""}
+    ${reach}${effects}
     ${c.reasons.length ? `<ul>${c.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
   </div>`;
 }
@@ -302,6 +308,13 @@ function renderSteps() {
       ${pend.map(f => f.map(c => candidate(c, false, "p", register(c, lastState))).join("")).join("")}</div></div></div>` : "";
   if (!data.steps.length) { $("steps").innerHTML = `<p class="empty">No step has been committed yet.</p>`; return; }
   $("steps").innerHTML = data.steps.slice().reverse().map(s => {
+    if (s.kind === "observed") {
+      const o = s.observed;
+      const seen = o.beings.length ? o.beings.map(b => `${esc(b.id)} (${esc(label(b.species))}) at (${b.cell})`).join(", ") : "no one";
+      return `<div class="step"><div class="step-head" data-seq="${s.sequence}">
+        <div><div class="step-title">Step ${s.sequence} · ${o.marker_seen ? `saw ${o.seen.length} cells` : "its senses failed their check"}</div>
+        <div class="step-sub">${o.marker_seen ? `What the senses reported, committed by the device: ${seen}, at ${o.resolution_mm} mm` : "They did not detect their reference marker, so nothing they report counts, and the body stops."}</div></div></div></div>`;
+    }
     if (s.kind === "update") {
       return `<div class="step"><div class="step-head" data-seq="${s.sequence}" style="cursor:default">
         <div><div class="step-title">Step ${s.sequence} · charter updated to version ${s.charter_version}</div>
@@ -317,7 +330,7 @@ function renderSteps() {
     const parentIdx = s.sequence - 1;
     return `<div class="step ${selected === s.sequence ? "sel" : ""}">
       <div class="step-head" data-seq="${s.sequence}">
-        <div><div class="step-title">Step ${s.sequence} · ${esc(label(chosen.action || "?"))}</div>
+        <div><div class="step-title">Step ${s.sequence} · ${esc(chosen.body ? chosen.act : label(chosen.action || "?"))}</div>
         <div class="step-sub">${s.fork.length} put forward · ${refused} refused${replaced ? ` · ${replaced} more in replaced forks` : ""} · wrote ${out}</div></div>
         <span class="meta">${isOpen ? "▾" : "▸"}</span>
       </div>
@@ -345,26 +358,23 @@ document.addEventListener("click", ev => {
   selected = seq;
   $("follow").checked = false;
   $("scrub").value = seq - 1;
-  renderCharter(); renderBands(); renderSteps();
+  renderMap(); renderSteps();
 });
 document.addEventListener("mouseover", ev => {
   const c = ev.target.closest(".cand");
   if (!c) return;
   const entry = index[+c.dataset.k];
   if (!entry) return;
-  if (+$("scrub").value !== entry.stateIdx) { $("follow").checked = false; $("scrub").value = entry.stateIdx; renderCharter(); }
-  const m = {};
-  entry.c.movements.forEach(v => { m[v.dim] = v.to; });
-  ghost = { moves: m, eligible: entry.c.outcome === "eligible" };
-  renderBands();
+  if (+$("scrub").value !== entry.stateIdx) { $("follow").checked = false; $("scrub").value = entry.stateIdx; }
+  ghost = { reach: entry.c.reach, eligible: entry.c.outcome === "eligible" };
+  renderMap();
 });
 document.addEventListener("mouseout", ev => {
-  if (ev.target.closest(".cand") && !(ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest(".cand"))) { ghost = null; if (data) renderBands(); }
+  if (ev.target.closest(".cand") && !(ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest(".cand"))) { ghost = null; if (data) renderMap(); }
 });
-$("scrub").addEventListener("input", () => { $("follow").checked = +$("scrub").value === data.states.length - 1; renderCharter(); renderBands(); });
-$("follow").addEventListener("change", () => { if ($("follow").checked && data) { $("scrub").value = data.states.length - 1; renderCharter(); renderBands(); } });
-let resizing = null;
-window.addEventListener("resize", () => { clearTimeout(resizing); resizing = setTimeout(() => data && renderBands(), 80); });
+$("scrub").addEventListener("input", () => { $("follow").checked = +$("scrub").value === data.states.length - 1; renderMap(); });
+$("follow").addEventListener("change", () => { if ($("follow").checked && data) { $("scrub").value = data.states.length - 1; renderMap(); } });
+$("truth").addEventListener("change", () => data && renderMap());
 poll();
 setInterval(poll, 2000);
 </script>

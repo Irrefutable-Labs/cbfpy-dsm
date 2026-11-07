@@ -11,7 +11,8 @@ pub const MAX_LINE: usize = 1 << 20;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
-    /// The actions there are, by name and description. No numbers.
+    /// The catalog's actions by name and description, the fact register, and whether a body is
+    /// attached. No numbers.
     Menu,
     Status,
     /// Branch these proposals from the current parent.
@@ -42,30 +43,25 @@ pub struct MenuItem {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Position {
-    pub dim: String,
-    pub value: i64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
     Menu {
         actions: Vec<MenuItem>,
         /// The register of verified facts the words are held to, as the charter signs it.
         facts: Vec<crate::honesty::Fact>,
+        /// Whether a body is attached, so body acts can be carried out.
+        has_body: bool,
     },
     Status {
         sequence: u64,
         tip: String,
         dsm_root: String,
         policy_hash: String,
-        positions: Vec<Position>,
+        /// What the chain knows: the map as seen, who was seen where, the body, the senses.
+        knowledge: ethical_world::knowledge::Knowledge,
     },
     Forked {
         fork_root: String,
-        fired_rules: Vec<u32>,
         futures: Vec<FutureReport>,
     },
     /// Committed: the enforcer has verified the step from its parent and stored it.
@@ -77,6 +73,8 @@ pub enum Response {
         decision: String,
         /// What the act wrote in the world, by path.
         effects: Vec<String>,
+        /// For a look: what the senses reported, now committed.
+        observed: Option<ethical_world::Observation>,
     },
     Refused {
         reason: String,

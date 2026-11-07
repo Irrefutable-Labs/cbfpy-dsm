@@ -118,5 +118,5 @@ jobs:
       - name: Check the proofs
         working-directory: dsm/lean
         run: |
-          lean BandInvariant.lean | tee lean.out
+          lean ProtectedLife.lean | tee lean.out
           if grep -q sorryAx lean.out; then echo "a proof uses sorry"; exit 1; fi

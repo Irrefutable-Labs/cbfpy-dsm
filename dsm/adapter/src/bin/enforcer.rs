@@ -2,7 +2,11 @@
 //! Unix socket that only its own user can open. A model never runs in this process.
 //!
 //! ethical-enforcer --store DIR --world DIR --charter C --signature SIG --authority PUBLIC
-//!                  --device-seed FILE --socket PATH [--agent-uid UID]
+//!                  --device-seed FILE --socket PATH [--sim WORLD.json] [--agent-uid UID]
+//!
+//! With `--sim`, a simulated world is the body: body acts are carried out in it, and looks report
+//! what is in it. It is the stand-in for physical reality, kept out of the world directory so no
+//! command can read it. Without it, no body act can be carried out.
 //!
 //! With `--agent-uid`, only that user may use the socket, and it may not be the enforcer's own:
 //! the AI then cannot read the device seed, the store or the world's files by any route but
@@ -20,7 +24,7 @@
 
 use ethical_autonomy_adapter::hexser::{decode, to_hex};
 use ethical_autonomy_adapter::keys::{read_public_key, read_secret_seed};
-use ethical_autonomy_adapter::server::Service;
+use ethical_autonomy_adapter::server::{Body, Service};
 use ethical_autonomy_adapter::store::ChainStore;
 use ethical_autonomy_adapter::{
     check_receipts, keypair_from_seed, parse_charter_config, pending_steps, Enforcer, SignedCharter,
@@ -39,13 +43,14 @@ struct Args {
     authority: PathBuf,
     agent_uid: Option<u32>,
     apply_update: bool,
+    sim: Option<PathBuf>,
 }
 
 fn args() -> Result<Args, String> {
     let mut a = std::env::args().skip(1);
     let (mut store, mut world, mut charter, mut signature, mut seed, mut socket) =
         (None, None, None, None, None, None);
-    let (mut authority, mut agent_uid) = (None, None);
+    let (mut authority, mut agent_uid, mut sim) = (None, None, None);
     let mut apply_update = false;
     while let Some(flag) = a.next() {
         if flag == "--apply-update" {
@@ -64,6 +69,7 @@ fn args() -> Result<Args, String> {
             "--device-seed" => seed = Some(value),
             "--socket" => socket = Some(value),
             "--authority" => authority = Some(value),
+            "--sim" => sim = Some(value),
             "--agent-uid" => {
                 agent_uid = Some(
                     value
@@ -85,6 +91,7 @@ fn args() -> Result<Args, String> {
         authority: authority.ok_or("--authority is required")?,
         agent_uid,
         apply_update,
+        sim,
     })
 }
 
@@ -124,6 +131,21 @@ fn run() -> Result<(), String> {
     if store_dir.starts_with(&world) || world.starts_with(&store_dir) {
         return Err("the store must not be inside the world, or contain it".to_string());
     }
+    let body = match &args.sim {
+        Some(path) => {
+            let full = path
+                .canonicalize()
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            if full.starts_with(&world) {
+                return Err(
+                    "the simulated world must not be inside the world directory".to_string()
+                );
+            }
+            Some(Body::open(full).map_err(|e| e.to_string())?)
+        }
+        None => None,
+    };
+    let standing = body.as_ref().map_or((0, 0), |b| b.world.body);
     let store = ChainStore::open(&args.store).map_err(|e| e.to_string())?;
     let _lock = store.lock().map_err(|e| e.to_string())?;
     let (enforcer, pending) = if store.exists() {
@@ -175,7 +197,8 @@ fn run() -> Result<(), String> {
         }
         (e, pending)
     } else {
-        let e = Enforcer::genesis(device, charter.clone(), &trusted).map_err(|e| e.to_string())?;
+        let e = Enforcer::genesis(device, charter.clone(), &trusted, standing)
+            .map_err(|e| e.to_string())?;
         store
             .begin(&e.state(), e.device_public(), &charter)
             .map_err(|e| e.to_string())?;
@@ -183,7 +206,7 @@ fn run() -> Result<(), String> {
         (e, vec![])
     };
     let tip = enforcer.tip();
-    let mut service = Service::start(enforcer, store, args.world.clone(), trusted, &pending)
+    let mut service = Service::start(enforcer, store, args.world.clone(), trusted, &pending, body)
         .map_err(|e| e.to_string())?;
     let socket_mode = match args.agent_uid {
         Some(uid) => {

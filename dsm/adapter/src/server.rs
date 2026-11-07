@@ -1,17 +1,47 @@
-//! The enforcer as a service. It owns the keys, the chain, the DSM head and the world. A client
-//! can only ask for the menu and the state, propose, and choose among what it was told is
-//! eligible. Only a committed step acts on the world, and only through `act::perform`.
+//! The enforcer as a service. It owns the keys, the chain, the DSM head, the world and the body. A
+//! client can only ask for the menu and the state, propose, and choose among what it was told is
+//! eligible. Only a committed step acts, and only through `act::perform` or `act::perform_body`.
 
-use crate::act::{perform, sweep_partial, EffectReceipt};
-use crate::enforcer::{AdapterError, Enforcer, Future, FutureStatus, StepRecord, MAX_FORK};
+use crate::act::{perform, perform_body, sweep_partial, EffectReceipt};
+use crate::enforcer::{AdapterError, Enforcer, Future, StepRecord, MAX_FORK};
 use crate::hexser::{decode, to_hex};
-use crate::protocol::{receive, send, MenuItem, Position, Request, Response};
+use crate::protocol::{receive, send, MenuItem, Request, Response};
 use crate::report::report;
 use crate::store::ChainStore;
 use crate::verify::verify_step;
 use std::io::BufReader;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
+
+/// The body the enforcer acts through: here, the simulated world, kept on disk so it outlasts a
+/// restart. It is the stand-in for physical reality, and the AI never reads it.
+pub struct Body {
+    path: PathBuf,
+    pub world: ethical_world::sim::World,
+}
+
+impl Body {
+    pub fn open(path: PathBuf) -> Result<Self, AdapterError> {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| AdapterError::Config(format!("{}: {e}", path.display())))?;
+        let world = serde_json::from_str(&text).map_err(|e| AdapterError::Config(e.to_string()))?;
+        Ok(Body { path, world })
+    }
+
+    fn save(&self) -> Result<(), AdapterError> {
+        let bytes = serde_json::to_vec_pretty(&self.world)
+            .map_err(|e| AdapterError::Effect(e.to_string()))?;
+        let temporary = self.path.with_extension("partial");
+        {
+            let mut file = std::fs::File::create(&temporary)
+                .map_err(|e| AdapterError::Effect(e.to_string()))?;
+            std::io::Write::write_all(&mut file, &bytes)
+                .and_then(|_| file.sync_all())
+                .map_err(|e| AdapterError::Effect(e.to_string()))?;
+        }
+        std::fs::rename(&temporary, &self.path).map_err(|e| AdapterError::Effect(e.to_string()))
+    }
+}
 
 pub struct Service {
     enforcer: Enforcer,
@@ -26,6 +56,7 @@ pub struct Service {
     halted: Option<String>,
     /// When set, only this user may use the socket, and it may not be the enforcer's own.
     agent_uid: Option<u32>,
+    body: Option<Body>,
 }
 
 impl Service {
@@ -38,6 +69,7 @@ impl Service {
         world: PathBuf,
         trusted_authority: Vec<u8>,
         pending: &[StepRecord],
+        body: Option<Body>,
     ) -> Result<Self, AdapterError> {
         std::fs::create_dir_all(&world).map_err(|e| AdapterError::Effect(e.to_string()))?;
         std::fs::set_permissions(&world, std::os::unix::fs::PermissionsExt::from_mode(0o700))
@@ -46,7 +78,7 @@ impl Service {
         if swept > 0 {
             eprintln!("removed {swept} temporary files an interrupted act left behind");
         }
-        let service = Service {
+        let mut service = Service {
             enforcer,
             store,
             world,
@@ -54,27 +86,67 @@ impl Service {
             open: None,
             halted: None,
             agent_uid: None,
+            body,
         };
         for step in pending {
-            let receipt = service.act(step)?;
+            let (receipt, _) = service.act(step)?;
             eprintln!(
                 "carried out the act of step {} after the restart",
                 receipt.sequence
             );
         }
+        // A look whose report was written but not yet committed: commit what the senses
+        // reported then, from the file its receipt names.
+        if service.enforcer.knowledge().awaiting.is_some() {
+            let sequence = service.enforcer.state().sequence;
+            let path = service.world.join(format!("looks/{sequence:06}.json"));
+            let observation = std::fs::read(&path)
+                .ok()
+                .and_then(|b| serde_json::from_slice(&b).ok())
+                .ok_or_else(|| {
+                    AdapterError::Effect(format!("the look of step {sequence} left no report"))
+                })?;
+            let store = &service.store;
+            service
+                .enforcer
+                .record_observation(observation, |r| store.append_observed(r))?;
+            eprintln!("committed the look of step {sequence} after the restart");
+        }
         Ok(service)
     }
 
-    fn act(&self, step: &StepRecord) -> Result<EffectReceipt, AdapterError> {
-        let outputs = perform(
-            &self.world,
-            step.successor.sequence,
-            &step.row.act,
-            &step.proposal.text,
-        )?;
+    /// Carry out a committed step's act, sign its receipt, and for a look, commit what was seen.
+    fn act(
+        &mut self,
+        step: &StepRecord,
+    ) -> Result<(EffectReceipt, Option<ethical_world::Observation>), AdapterError> {
+        let sequence = step.successor.sequence;
+        let (outputs, observation) = match (&step.row, &step.proposal.body) {
+            (Some(row), _) => (
+                perform(&self.world, sequence, &row.act, &step.proposal.text)?,
+                None,
+            ),
+            (None, Some(act)) => {
+                let body = self
+                    .body
+                    .as_mut()
+                    .ok_or_else(|| AdapterError::Effect("no body is attached".to_string()))?;
+                let done = perform_body(&self.world, &mut body.world, sequence, act)?;
+                body.save()?;
+                done
+            }
+            (None, None) => {
+                return Err(AdapterError::Effect("a step that does nothing".to_string()))
+            }
+        };
         let receipt = self.enforcer.sign_receipt(step, outputs)?;
         self.store.append_receipt(&receipt)?;
-        Ok(receipt)
+        if let Some(obs) = &observation {
+            let store = &self.store;
+            self.enforcer
+                .record_observation(obs.clone(), |r| store.append_observed(r))?;
+        }
+        Ok((receipt, observation))
     }
 
     /// Serve only `uid`, which must not be the enforcer's own user.
@@ -117,6 +189,7 @@ impl Service {
                     })
                     .collect(),
                 facts: self.enforcer.charter().catalog.facts.clone(),
+                has_body: self.body.is_some(),
             },
             Request::Status => {
                 let state = self.enforcer.state();
@@ -125,18 +198,7 @@ impl Service {
                     tip: to_hex(&state.tip),
                     dsm_root: to_hex(&self.enforcer.dsm_root()),
                     policy_hash: to_hex(&state.policy_hash),
-                    positions: self
-                        .enforcer
-                        .charter()
-                        .policy
-                        .bands
-                        .iter()
-                        .zip(&state.positions)
-                        .map(|(b, v)| Position {
-                            dim: b.name.clone(),
-                            value: *v,
-                        })
-                        .collect(),
+                    knowledge: state.knowledge,
                 }
             }
             Request::Propose { proposals } => {
@@ -148,6 +210,12 @@ impl Service {
                 if proposals.is_empty() {
                     return Response::Refused {
                         reason: "nothing was proposed".to_string(),
+                    };
+                }
+                if self.body.is_none() && proposals.iter().any(|p| p.body.is_some()) {
+                    return Response::Refused {
+                        reason: "no body is attached, so no body act can be carried out"
+                            .to_string(),
                     };
                 }
                 if proposals.len() > MAX_FORK {
@@ -171,22 +239,9 @@ impl Service {
                     }
                 }
                 let futures = self.enforcer.fork(&proposals);
-                let fired_rules = futures
-                    .iter()
-                    .find_map(|f| match &f.status {
-                        FutureStatus::Eligible(e) | FutureStatus::Rejected(e) => {
-                            Some(e.fired_rules.clone())
-                        }
-                        FutureStatus::Unmeasured
-                        | FutureStatus::Malformed
-                        | FutureStatus::Undisclosed(_)
-                        | FutureStatus::Deceptive(_) => None,
-                    })
-                    .unwrap_or_default();
                 let response = Response::Forked {
                     fork_root: to_hex(&futures[0].fork_root),
-                    fired_rules,
-                    futures: report(&futures, &self.enforcer.charter().policy),
+                    futures: report(&futures),
                 };
                 self.open = Some(futures);
                 response
@@ -241,13 +296,14 @@ impl Service {
         self.open = None;
         // Only now, with the step committed and stored, does anything happen in the world.
         match self.act(&step) {
-            Ok(receipt) => Response::Committed {
+            Ok((receipt, observed)) => Response::Committed {
                 sequence: step.successor.sequence,
                 action: step.proposal.action.clone(),
                 fork_size: step.fork.len(),
                 tip: to_hex(&step.successor.tip),
                 decision: to_hex(&step.decision_commit),
                 effects: receipt.outputs.iter().map(|o| o.path.clone()).collect(),
+                observed,
             },
             Err(e) => {
                 let why = format!(

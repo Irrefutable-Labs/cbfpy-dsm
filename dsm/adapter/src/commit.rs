@@ -1,7 +1,6 @@
 //! Every commitment this layer makes, in one place. DSM's own hashes and its own branch
 //! commitment are used as they are. Only the domain names are new.
 
-use crate::charter::CatalogRow;
 use crate::Hash;
 use dsm::crypto::blake3::domain_hash_bytes;
 use dsm::crypto::domain::TaggedHashDomain;
@@ -34,6 +33,10 @@ const CANDIDATE: TaggedHashDomain<'static> =
 const FORK: TaggedHashDomain<'static> = dsm::tagged_domain!(b"DSM/ethical-autonomy/fork/v0");
 const DECISION: TaggedHashDomain<'static> =
     dsm::tagged_domain!(b"DSM/ethical-autonomy/decision/v0");
+const KNOWLEDGE: TaggedHashDomain<'static> =
+    dsm::tagged_domain!(b"DSM/ethical-autonomy/knowledge/v0");
+const OBSERVED: TaggedHashDomain<'static> =
+    dsm::tagged_domain!(b"DSM/ethical-autonomy/observed/v0");
 
 /// Frames each part with its length, so no two lists of parts share an encoding.
 pub fn frame(parts: &[&[u8]]) -> Vec<u8> {
@@ -45,12 +48,22 @@ pub fn frame(parts: &[&[u8]]) -> Vec<u8> {
     out
 }
 
-pub fn integers(values: &[i64]) -> Vec<u8> {
-    let mut out = (values.len() as u64).to_be_bytes().to_vec();
-    for v in values {
-        out.extend_from_slice(&v.to_be_bytes());
-    }
-    out
+/// What the chain knows at a state: the map as seen, who was seen where, the body, the senses.
+pub fn knowledge_hash(k: &ethical_world::knowledge::Knowledge) -> Hash {
+    domain_hash_bytes(KNOWLEDGE, &k.canonical_bytes())
+}
+
+/// An observation the device attests, answering the look its parent asked for.
+pub fn observed_commit(
+    parent_tip: &Hash,
+    parent_state: &Hash,
+    observation: &[u8],
+    successor: &Hash,
+) -> Hash {
+    domain_hash_bytes(
+        OBSERVED,
+        &frame(&[parent_tip, parent_state, observation, successor]),
+    )
 }
 
 pub fn policy_hash(canonical: &[u8]) -> Hash {
@@ -68,7 +81,7 @@ pub fn charter_message(policy: &Hash, catalog: &Hash) -> Hash {
 pub struct StateFields<'a> {
     pub sequence: u64,
     pub tip: &'a Hash,
-    pub positions: &'a [i64],
+    pub knowledge: &'a Hash,
     pub policy: &'a Hash,
     pub catalog: &'a Hash,
     pub entropy: &'a Hash,
@@ -81,7 +94,7 @@ pub fn state_commit(s: &StateFields<'_>) -> Hash {
         &frame(&[
             &s.sequence.to_be_bytes(),
             s.tip,
-            &integers(s.positions),
+            s.knowledge,
             s.policy,
             s.catalog,
             s.entropy,
@@ -91,25 +104,25 @@ pub fn state_commit(s: &StateFields<'_>) -> Hash {
 }
 
 /// The successor as a decision can name it: its tip does not exist until the step does.
-pub fn successor_commit(sequence: u64, positions: &[i64], policy: &Hash, catalog: &Hash) -> Hash {
+pub fn successor_commit(sequence: u64, knowledge: &Hash, policy: &Hash, catalog: &Hash) -> Hash {
     domain_hash_bytes(
         SUCCESSOR,
-        &frame(&[
-            &sequence.to_be_bytes(),
-            &integers(positions),
-            policy,
-            catalog,
-        ]),
+        &frame(&[&sequence.to_be_bytes(), knowledge, policy, catalog]),
     )
 }
 
-/// A proposal: its action, reasons, the text it carries for its act and its declaration. All of
+/// A proposal: its action or body act, reasons, the text it carries and its declaration. All of
 /// it is bound, so none of it can change between the fork and the act.
 pub fn proposal_commit(p: &crate::enforcer::Proposal) -> Hash {
     let declaration = p
         .declaration
         .as_ref()
         .map(crate::disclosure::Declaration::canonical_bytes)
+        .unwrap_or_default();
+    let body = p
+        .body
+        .as_ref()
+        .map(ethical_world::Act::canonical_bytes)
         .unwrap_or_default();
     domain_hash_bytes(
         PROPOSAL,
@@ -119,6 +132,8 @@ pub fn proposal_commit(p: &crate::enforcer::Proposal) -> Hash {
             p.text.as_bytes(),
             &[u8::from(p.declaration.is_some())],
             &declaration,
+            &[u8::from(p.body.is_some())],
+            &body,
         ]),
     )
 }
@@ -136,18 +151,12 @@ pub fn world_file_hash(bytes: &[u8]) -> Hash {
 
 /// A branch commitment over this candidate at the parent tip, made with DSM's own function. DSM's
 /// bilateral path feeds that function an operation and its transition entropy. Here the operation
-/// does not exist until a branch is chosen, so the payload is the proposal and its catalog row,
-/// and the entropy is derived from the parent tip and policy. The charter bounds a row far below
-/// what DSM's length prefix can frame.
-pub fn branch_commitment(
-    parent_tip: &Hash,
-    policy: &Hash,
-    proposal: &Hash,
-    row: Option<&CatalogRow>,
-) -> Hash {
-    let row_bytes = row.map(CatalogRow::canonical_bytes).unwrap_or_default();
+/// does not exist until a branch is chosen, so the payload is the proposal and what it would do
+/// (its catalog row, or its body act), and the entropy is derived from the parent tip and policy.
+/// Both are bounded far below what DSM's length prefix can frame.
+pub fn branch_commitment(parent_tip: &Hash, policy: &Hash, proposal: &Hash, what: &[u8]) -> Hash {
     let entropy = domain_hash_bytes(FORK_ENTROPY, &frame(&[parent_tip, policy]));
-    let payload = frame(&[proposal, &row_bytes]);
+    let payload = frame(&[proposal, what]);
     match dsm::commitments::precommit::branch_commitment_hash(parent_tip, &payload, &entropy) {
         Ok(h) => h,
         // A catalog row is bounded by the charter, far below what the prefix frames.
@@ -159,8 +168,8 @@ pub fn evaluation_commit(canonical: &[u8]) -> Hash {
     domain_hash_bytes(EVALUATION, canonical)
 }
 
-pub fn evidence_commit(catalog: &Hash, row: &CatalogRow) -> Hash {
-    domain_hash_bytes(EVIDENCE, &frame(&[catalog, &row.canonical_bytes()]))
+pub fn evidence_commit(catalog: &Hash, what: &[u8]) -> Hash {
+    domain_hash_bytes(EVIDENCE, &frame(&[catalog, what]))
 }
 
 pub struct DecisionFields<'a> {

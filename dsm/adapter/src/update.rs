@@ -1,42 +1,27 @@
 //! Foundations and operational permissions.
 //!
 //! A charter has two parts. Its **foundation** is what no one may change once a chain begins:
-//! the prohibited acts, and every band's hard limits. Beside it, the non-concealment invariant
-//! is fixed in code and cannot be configured away. Everything else in a charter is
-//! **operational**: the bands inside those hard limits, the coupling rules, the catalog. An
+//! who is protected (the species table and the threshold), and the acts that are never done.
+//! Beside it, the protected-life checks, non-concealment and the deception rules are fixed in
+//! code and cannot be configured away. Everything else in a charter is **operational**: how fresh
+//! evidence must be, how many looks a worst case needs, the vehicle's braking and top speed, the
+//! catalog and the fact register. An
 //! operational change is a new charter signed by the charter authority, applied by the
 //! operator, never by the AI, and recorded on the chain as its own step. It is refused if it
 //! touches the foundation, if its version does not rise, or if the authority did not sign it.
 
+use crate::charter::Policy;
 use crate::charter::SignedCharter;
 use crate::commit;
 use crate::enforcer::{derive_transition_entropy, identity_of, AttestedState};
 use crate::Hash;
 use dsm::crypto::sphincs;
 use dsm::types::device_state::relationship_chain_tip_v2;
-use ethical_band_engine::Policy;
 use serde::{Deserialize, Serialize};
 
-/// What a charter's foundation consists of, in a fixed order.
+/// What a charter's foundation consists of.
 pub fn foundation_bytes(policy: &Policy) -> Vec<u8> {
-    let tags: Vec<&[u8]> = policy
-        .prohibited_tags
-        .iter()
-        .map(|t| t.as_bytes())
-        .collect();
-    let bands: Vec<Vec<u8>> = policy
-        .bands
-        .iter()
-        .map(|b| {
-            commit::frame(&[
-                b.name.as_bytes(),
-                &b.hard_pos.to_be_bytes(),
-                &b.hard_neg.to_be_bytes(),
-            ])
-        })
-        .collect();
-    let band_refs: Vec<&[u8]> = bands.iter().map(Vec::as_slice).collect();
-    commit::frame(&[&commit::frame(&tags), &commit::frame(&band_refs)])
+    serde_json::to_vec(&policy.foundation).unwrap_or_default()
 }
 
 pub fn foundation_hash(policy: &Policy) -> Hash {
@@ -70,7 +55,7 @@ pub enum UpdateRefusal {
     ParentNotUnderOldCharter,
     BadParentAttestation,
     WrongParent,
-    PositionsChanged,
+    KnowledgeChanged,
     CommitMismatch,
     BadDeviceSignature,
     TipMismatch,
@@ -155,10 +140,18 @@ pub fn verify_update(
 
     let (policy, catalog) = (new.policy_hash(), new.catalog_hash());
     let sequence = parent.sequence + 1;
-    if update.successor.positions != parent.positions {
-        return Err(UpdateRefusal::PositionsChanged);
+    let knowledge = parent
+        .knowledge
+        .after(&ethical_world::Act::Wait {}, sequence);
+    if update.successor.knowledge != knowledge {
+        return Err(UpdateRefusal::KnowledgeChanged);
     }
-    let successor = commit::successor_commit(sequence, &parent.positions, &policy, &catalog);
+    let successor = commit::successor_commit(
+        sequence,
+        &commit::knowledge_hash(&knowledge),
+        &policy,
+        &catalog,
+    );
     let expected = update_commit(&UpdateFields {
         parent_tip: &parent.tip,
         parent_state: &parent.commitment(),

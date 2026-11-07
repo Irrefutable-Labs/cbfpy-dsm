@@ -6,8 +6,55 @@ use crate::charter::{CatalogRow, SignedCharter};
 use crate::commit;
 use crate::enforcer::Proposal;
 use crate::Hash;
-use ethical_band_engine::{evaluate, Evaluation};
+use ethical_world::check::{check, Verdict};
+use ethical_world::knowledge::Knowledge;
 use serde::{Deserialize, Serialize};
+
+/// What the rules make of a candidate from its parent: the protected-life verdict, and the
+/// knowledge the step would leave behind.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Evaluation {
+    pub verdict: Verdict,
+    pub successor: Knowledge,
+}
+
+impl Evaluation {
+    pub fn is_eligible(&self) -> bool {
+        self.verdict.allowed()
+    }
+
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        commit::frame(&[
+            &serde_json::to_vec(&self.verdict).unwrap_or_default(),
+            &commit::knowledge_hash(&self.successor),
+        ])
+    }
+}
+
+/// The rules applied to a candidate from its parent's knowledge. A catalog act moves no body, so
+/// only the time moves; a body act is checked and, if allowed, leaves the knowledge it expects.
+pub fn evaluate(charter: &SignedCharter, parent: &Knowledge, proposal: &Proposal) -> Evaluation {
+    let next = parent.step + 1;
+    let wait = ethical_world::Act::Wait {};
+    let act = proposal.body.as_ref().unwrap_or(&wait);
+    let verdict = check(
+        &charter.policy.foundation,
+        &charter.policy.operational,
+        parent,
+        act,
+    );
+    let successor = parent.after(act, next);
+    Evaluation { verdict, successor }
+}
+
+/// What a candidate would do, as its branch commits to it: its catalog row, or its body act.
+pub fn what_it_does(row: Option<&CatalogRow>, proposal: &Proposal) -> Vec<u8> {
+    match (row, &proposal.body) {
+        (Some(r), _) => r.canonical_bytes(),
+        (None, Some(b)) => b.canonical_bytes(),
+        (None, None) => vec![],
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -39,11 +86,7 @@ pub struct CandidateRecord {
 
 impl CandidateRecord {
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let row = self
-            .row
-            .as_ref()
-            .map(CatalogRow::canonical_bytes)
-            .unwrap_or_default();
+        let row = what_it_does(self.row.as_ref(), &self.proposal);
         let outcome = [match self.outcome {
             Outcome::Eligible => 1u8,
             Outcome::Refused => 2,
@@ -71,39 +114,63 @@ impl CandidateRecord {
     }
 }
 
-/// Work out one candidate from a parent: its measurement from the signed catalog, its branch
-/// commitment, and the engine's verdict. The enforcer and the verifier both call exactly this.
+/// Every reason a candidate's declaration or words fail, before the rules are asked.
+pub fn disclosure_failures(
+    charter: &SignedCharter,
+    row: Option<&CatalogRow>,
+    proposal: &Proposal,
+) -> (Vec<String>, Vec<String>) {
+    match (row, &proposal.body) {
+        (Some(r), _) => (
+            crate::disclosure::concealments(
+                &r.act,
+                &r.material,
+                &proposal.rationale,
+                proposal.declaration.as_ref(),
+            ),
+            crate::honesty::check_proposal(charter, r, proposal),
+        ),
+        (None, Some(b)) => (
+            crate::disclosure::body_concealments(
+                b,
+                &proposal.rationale,
+                proposal.declaration.as_ref(),
+            ),
+            crate::honesty::check_body(charter, b, proposal),
+        ),
+        (None, None) => (vec![], vec![]),
+    }
+}
+
+/// Work out one candidate from a parent: what it would do, its branch commitment, and the
+/// rules' verdict. The enforcer and the verifier both call exactly this.
 pub fn record_candidate(
     charter: &SignedCharter,
     parent_tip: &Hash,
-    parent_positions: &[i64],
+    parent: &Knowledge,
     proposal: &Proposal,
 ) -> (CandidateRecord, Option<Evaluation>) {
     let policy = charter.policy_hash();
-    let row = charter.catalog.row(&proposal.action).cloned();
+    // A body act goes by the reserved name and carries its act; anything else is a catalog row.
+    let is_body = proposal.action == crate::charter::BODY && proposal.body.is_some();
+    let row = if proposal.body.is_some() {
+        None
+    } else {
+        charter.catalog.row(&proposal.action).cloned()
+    };
     let branch = commit::branch_commitment(
         parent_tip,
         &policy,
         &commit::proposal_commit(proposal),
-        row.as_ref(),
+        &what_it_does(row.as_ref(), proposal),
     );
-    let evaluation = row
-        .as_ref()
-        .map(|r| evaluate(&charter.policy, parent_positions, &r.measurement()));
-    let fits = row
-        .as_ref()
-        .is_some_and(|r| r.act.accepts_text(&proposal.text));
-    let hidden = row.as_ref().map_or(vec![], |r| {
-        crate::disclosure::concealments(
-            &r.act,
-            &r.material,
-            &proposal.rationale,
-            proposal.declaration.as_ref(),
-        )
-    });
-    let deceptive = row.as_ref().map_or(vec![], |r| {
-        crate::honesty::check_proposal(charter, r, proposal)
-    });
+    let evaluation = (row.is_some() || is_body).then(|| evaluate(charter, parent, proposal));
+    let fits = match (&row, &proposal.body) {
+        (Some(r), _) => r.act.accepts_text(&proposal.text),
+        (None, Some(b)) => is_body && proposal.text.is_empty() && body_fits(b),
+        (None, None) => false,
+    };
+    let (hidden, deceptive) = disclosure_failures(charter, row.as_ref(), proposal);
     let outcome = match &evaluation {
         None => Outcome::Unmeasured,
         Some(_) if !fits => Outcome::Malformed,
@@ -122,6 +189,22 @@ pub fn record_candidate(
             .map(|e| commit::evaluation_commit(&e.canonical_bytes())),
     };
     (record, evaluation)
+}
+
+/// A body act within the bounds a step may carry.
+fn body_fits(act: &ethical_world::Act) -> bool {
+    match act {
+        ethical_world::Act::Speak { to, text } => {
+            crate::act::simple_name(to)
+                && !text.trim().is_empty()
+                && text.len() <= crate::act::MAX_TEXT
+        }
+        ethical_world::Act::Observe { cells } => !cells.is_empty() && cells.len() <= 64,
+        ethical_world::Act::Move { path } | ethical_world::Act::Drive { path, .. } => {
+            !path.is_empty() && path.len() <= 32
+        }
+        _ => true,
+    }
 }
 
 pub fn fork_root(records: &[CandidateRecord]) -> Hash {

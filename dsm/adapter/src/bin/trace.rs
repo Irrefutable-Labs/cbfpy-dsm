@@ -1,76 +1,60 @@
-//! Prints the engine's outward allowances for a charter over a sample of parents, for CBFpy's
-//! cross-check in `test/test_ethics_crosscheck.py`. One line per parent: the parent's positions,
-//! then each dimension's allowance up and down.
+//! The van's speed limit as the enforcer decides it, for the CBFpy cross-check in
+//! `test/test_ethics_crosscheck.py`. One line per case: the speed in cm/s, the cells of road seen
+//! clear ahead of where the van will be, and 1 if the drive is allowed or 0 if not.
 //!
-//! ethical-trace --charter dsm/scenarios/charter.json
+//! ethical-trace --charter scenarios/charter.json
+//!
+//! Every verdict comes from `ethical_world::check`, on knowledge built as a run would commit it:
+//! the road looked at twice, recently, at a resolution fine enough to see a honeybee.
 
 use ethical_autonomy_adapter::parse_charter_config;
-use ethical_band_engine::{allowed_outward, effective_bands, Cond, Effect, Policy, Side, Test};
+use ethical_world::check::check;
+use ethical_world::knowledge::Knowledge;
+use ethical_world::{Act, Cell, Observation, Terrain};
 use std::process::ExitCode;
 
-/// Parents that make each coupling rule's conditions hold, so the sample covers every rule.
-fn anchors(policy: &Policy) -> Vec<Vec<i64>> {
-    let centers: Vec<i64> = policy.bands.iter().map(|b| b.center).collect();
-    let mut out = vec![centers.clone()];
-    for rule in &policy.rules {
-        if !matches!(rule.effect, Effect::Adjust { .. }) {
-            continue;
-        }
-        let mut parent = centers.clone();
-        for Cond { dim, test } in &rule.when {
-            let d = match *test {
-                Test::DeviationAtLeast(x) | Test::SignedAtLeast(x) => x,
-                Test::SignedAtMost(x) => x,
-                Test::DeviationAtMost(_) => 0,
-            };
-            parent[*dim] = centers[*dim] + d;
-        }
-        out.push(parent);
-    }
-    out
-}
-
-fn inside_stops(policy: &Policy, parent: &[i64]) -> bool {
-    let bands = effective_bands(policy, parent);
-    policy
-        .bands
-        .iter()
-        .zip(&bands)
-        .zip(parent)
-        .all(|((b, e), p)| {
-            let d = p - b.center;
-            d <= e.no_outward_pos && -d <= e.no_outward_neg
-        })
+fn road(seen_ahead: i32, resolution_mm: u32) -> Knowledge {
+    let cells: Vec<Cell> = (1..=1 + seen_ahead).map(|x| (x, 0)).collect();
+    let terrain: Vec<(Cell, Terrain)> = (0..=60).map(|x| ((x, 0), Terrain::Road)).collect();
+    let look = Observation {
+        seen: cells,
+        resolution_mm,
+        marker_seen: true,
+        terrain,
+        beings: vec![],
+    };
+    let k = Knowledge::starting_at((0, 0));
+    let k = k
+        .after(&Act::Observe { cells: vec![] }, 1)
+        .observed(&look, 2);
+    k.after(&Act::Observe { cells: vec![] }, 3)
+        .observed(&look, 4)
 }
 
 fn run() -> Result<(), String> {
-    let mut args = std::env::args().skip(1);
-    let mut charter = None;
-    while let Some(flag) = args.next() {
-        match flag.as_str() {
-            "--charter" => charter = args.next(),
-            other => return Err(format!("unknown flag {other}")),
-        }
+    let mut a = std::env::args().skip(1);
+    let (Some(flag), Some(path)) = (a.next(), a.next()) else {
+        return Err("--charter is required".to_string());
+    };
+    if flag != "--charter" {
+        return Err(format!("unknown flag {flag}"));
     }
-    let path = charter.ok_or("--charter is required")?;
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
     let (policy, _) = parse_charter_config(&text).map_err(|e| e.to_string())?;
-    policy.validate().map_err(|e| format!("{e:?}"))?;
-    for anchor in anchors(&policy) {
-        for dim in 0..policy.bands.len() {
-            for v in (-1_200..=1_200).step_by(20) {
-                let mut parent = anchor.clone();
-                parent[dim] = policy.bands[dim].center + v;
-                if !inside_stops(&policy, &parent) {
-                    continue;
-                }
-                let mut line: Vec<String> = parent.iter().map(i64::to_string).collect();
-                for d in 0..policy.bands.len() {
-                    line.push(allowed_outward(&policy, &parent, d, Side::Positive).to_string());
-                    line.push(allowed_outward(&policy, &parent, d, Side::Negative).to_string());
-                }
-                println!("{}", line.join(" "));
-            }
+    let fine = policy.foundation.smallest_protected_mm();
+    for seen_ahead in 0..=25 {
+        let k = road(seen_ahead, fine);
+        for speed in (50..=policy.operational.top_speed_cm_s).step_by(50) {
+            let v = check(
+                &policy.foundation,
+                &policy.operational,
+                &k,
+                &Act::Drive {
+                    path: vec![(1, 0)],
+                    speed_cm_s: speed,
+                },
+            );
+            println!("{speed} {seen_ahead} {}", u8::from(v.allowed()));
         }
     }
     Ok(())

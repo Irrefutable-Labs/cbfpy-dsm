@@ -1,9 +1,11 @@
-"""The DSM integer engine against CBFpy, on the real charter.
+"""The DSM enforcer's speed limit against CBFpy's braking barrier, on the real charter.
 
-The engine prints its allowances with `ethical-trace`. CBFpy solves a strict QP for the same bands
-in floats. The engine floors, so its answer must sit at or just under the solver's.
+`ethical-trace` prints, for each speed and each length of road seen clear, whether the enforcer
+allows the drive. The braking barrier `h = s - v^2 / 2a` must agree on every case, and a van at
+every allowed speed, filtered by CBFpy's safety filter, must stop within the road it has seen.
 """
 
+import json
 import os
 import subprocess
 import unittest
@@ -16,11 +18,11 @@ import jax  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
 
 from cbfpy import CBF  # noqa: E402
-from cbfpy.ethics import BandsConfig, load_charter  # noqa: E402
+from cbfpy.ethics import BrakingConfig  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CHARTER = ROOT / "dsm" / "scenarios" / "charter.json"
-PUSH = 5000.0
+CELL_M = 1.0
 
 
 def engine_trace():
@@ -29,60 +31,58 @@ def engine_trace():
          "ethical-trace", "--", "--charter", str(CHARTER)],
         cwd=ROOT / "dsm", check=True, capture_output=True, text=True,
     ).stdout
-    return [[int(v) for v in line.split()] for line in out.splitlines() if line.strip()]
+    return [tuple(int(v) for v in line.split()) for line in out.splitlines() if line.strip()]
 
 
 class CrossCheck(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.config = BandsConfig(load_charter(CHARTER))
-        cls.n = cls.config.n
+        operational = json.loads(CHARTER.read_text())["policy"]["operational"]
+        cls.braking = operational["braking_cm_s2"] / 100.0
+        cls.config = BrakingConfig(cls.braking)
         cbf = CBF.from_config(cls.config)
-        cls.filter = staticmethod(jax.jit(jax.vmap(cbf.safety_filter)))
+        cls.filter = staticmethod(jax.jit(cbf.safety_filter))
         cls.rows = engine_trace()
 
-    def test_the_sample_covers_every_band_and_every_adjusting_rule(self):
-        self.assertEqual(self.n, 6)
-        self.assertGreater(len(self.rows), 1000)
-        fired = set()
-        for row in self.rows:
-            z = jnp.array([float(v) for v in row[: self.n]])
-            up, down = self.config.limits(z)
-            for i in range(self.n):
-                if float(up[i]) != float(self.config.limit_pos[i]) or float(down[i]) != float(
-                    self.config.limit_neg[i]
-                ):
-                    fired.add(i)
-        # Rule targets in the charter: curiosity (1) and risk_reward (3).
-        self.assertEqual(fired, {1, 3})
+    def barrier(self, speed_cm_s, seen):
+        z = jnp.array([seen * CELL_M, speed_cm_s / 100.0])
+        return float(self.config.h_1(z)[0])
 
-    def test_every_allowance_matches_the_barrier_solver(self):
-        n = self.n
-        parents = jnp.array([[float(v) for v in row[:n]] for row in self.rows])
-        worst, compared = 0.0, 0
-        for i in range(n):
-            for sign, column in ((1.0, n + 2 * i), (-1.0, n + 2 * i + 1)):
-                push = jnp.zeros((len(self.rows), n)).at[:, i].set(sign * PUSH)
-                safe = self.filter(parents, push)
-                for row, u in zip(self.rows, safe):
-                    deviation = row[i] - int(self.config.center[i])
-                    # Only the same side is comparable: the engine is stricter on a crossing.
-                    if sign * deviation < 0:
-                        continue
-                    engine, solver = row[column], sign * float(u[i])
-                    gap = solver - engine
-                    worst = max(worst, abs(gap))
-                    compared += 1
-                    self.assertGreaterEqual(gap, -1e-3, (row, i, sign, engine, solver))
-                    self.assertLess(gap, 1.0 + 1e-3, (row, i, sign, engine, solver))
-        self.assertGreater(compared, 5000)
-        print(f"\ncompared {compared} allowances, widest gap {worst:.6f} of a unit")
+    def test_the_sample_has_both_verdicts_at_every_length_of_road(self):
+        self.assertGreater(len(self.rows), 500)
+        # Past 22.5 m, even the top speed of 15 m/s can stop, so only "allowed" is left.
+        for seen in range(1, 23):
+            verdicts = {a for (_, d, a) in self.rows if d == seen}
+            self.assertEqual(verdicts, {0, 1}, seen)
 
-    def test_a_quadratic_band_that_coupling_moves_is_refused(self):
-        charter = load_charter(CHARTER)
-        charter["policy"]["bands"][1]["curve"]["kind"] = "quadratic"
-        with self.assertRaises(ValueError):
-            BandsConfig(charter)
+    def test_every_verdict_matches_the_braking_barrier(self):
+        for speed, seen, allowed in self.rows:
+            # Integer cm, so the barrier's boundary is exact: allowed iff it can stop in time.
+            safe = self.barrier(speed, seen) >= -1e-12
+            self.assertEqual(bool(allowed), safe, (speed, seen))
+
+    def test_a_van_at_any_allowed_speed_stays_able_to_stop_within_what_it_has_seen(self):
+        # From every allowed state, filtered by CBFpy with no wish to slow down, the van never
+        # gets nearer the end of the road it has seen than its own stopping distance.
+        dt = 0.005
+        checked = 0
+        for speed, seen, allowed in self.rows:
+            if not allowed or seen % 5 != 0 or speed % 250 != 0:
+                continue
+            z = jnp.array([seen * CELL_M, speed / 100.0])
+            worst = float(self.config.h_1(z)[0])
+            for _ in range(int(20.0 / dt)):
+                u = self.filter(z, jnp.array([0.0]))
+                v = max(float(z[1]) + float(u[0]) * dt, 0.0)
+                z = jnp.array([float(z[0]) - float(z[1]) * dt, v])
+                worst = min(worst, float(self.config.h_1(z)[0]))
+                if v == 0.0:
+                    break
+            # Within one step's integration error of the barrier, and so never past the road.
+            self.assertGreaterEqual(worst, -speed / 100.0 * dt, (speed, seen))
+            self.assertGreaterEqual(float(z[0]), -speed / 100.0 * dt, (speed, seen))
+            checked += 1
+        self.assertGreater(checked, 10)
 
 
 if __name__ == "__main__":

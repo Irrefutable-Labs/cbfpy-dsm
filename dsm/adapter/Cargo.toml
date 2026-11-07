@@ -7,7 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-ethical-band-engine = { path = "../engine" }
+ethical-world = { path = "../world" }
 # DSM, used through its public API only, pinned to the commit this was built and verified on.
 dsm = { git = "https://github.com/deterministicstatemachine/dsm", rev = "b6060a3349ead0ccbfd853cd74f1d058e323e2ba" }
 serde = { version = "1.0", features = ["derive"] }
@@ -29,6 +29,7 @@ path = "src/bin/audit.rs"
 [[bin]]
 name = "ethical-sign-charter"
 path = "src/bin/sign_charter.rs"
+
 
 [[bin]]
 name = "ethical-trace"

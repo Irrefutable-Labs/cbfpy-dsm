@@ -1,12 +1,12 @@
 # CBFpy for DSM
 
-**This fork, by Irrefutable Labs, adds a DSM ethical autonomy prototype.** An AI proposes alternative decisions, and deterministic, multidimensional ethical bands decide which may become a real step on a [Deterministic State Machine](https://github.com/deterministicstatemachine/dsm) chain. CBFpy checks those bands independently as control barrier functions.
+**This fork, by Irrefutable Labs, adds a DSM ethical autonomy prototype.** An AI with a body proposes what to do next, and deterministic rules decide which may become a real step on a [Deterministic State Machine](https://github.com/deterministicstatemachine/dsm) chain: it may not harm or endanger any animal bigger than a baby mouse, or any honeybee; anything it has not seen counts as occupied; it may not leave anyone worse off than they are now; and without working senses its body does nothing. CBFpy checks the van's braking limit independently as a control barrier function.
 
-- [`dsm/`](dsm/README.md): the engine, the DSM adapter, the demo, the Lean proofs and the report.
-- [`cbfpy/ethics/`](cbfpy/ethics/bands.py): the bands as a CBFpy problem.
+- [`dsm/`](dsm/README.md): the checks, the DSM adapter, the simulated world and scenarios, the Lean proofs and the report.
+- [`cbfpy/ethics/`](cbfpy/ethics/braking.py): the braking limit as a CBFpy problem.
 - [`test/test_ethics_crosscheck.py`](test/test_ethics_crosscheck.py): the cross-check.
 
-It enforces the measurements it is given. It does not understand ethics: see [the report](dsm/REPORT.md).
+It enforces the rules and facts it is given, in a simulated world. It does not understand ethics: see [the report](dsm/REPORT.md).
 
 The original CBFpy README follows.
 

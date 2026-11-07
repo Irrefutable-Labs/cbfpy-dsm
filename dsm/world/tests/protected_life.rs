@@ -150,7 +150,7 @@ fn before_its_senses_prove_themselves_it_can_think_and_speak_but_not_move() {
         &r.verdict(&Act::Move { path: vec![(1, 0)] }),
         |x| matches!(x, Refusal::Blind { .. })
     ));
-    assert!(r.verdict(&Act::Wait).allowed());
+    assert!(r.verdict(&Act::Wait {}).allowed());
     assert!(r
         .verdict(&Act::Speak {
             to: "anyone".into(),
@@ -193,7 +193,7 @@ fn senses_that_have_not_proved_themselves_recently_count_as_not_working() {
     let mut r = Run::new(world(&open(&row(0, 0, 3)), vec![], (0, 0)));
     r.look(&row(0, 1, 3));
     for _ in 0..4 {
-        assert!(r.act(Act::Wait).allowed());
+        assert!(r.act(Act::Wait {}).allowed());
     }
     let v = r.verdict(&Act::Move { path: vec![(1, 0)] });
     assert!(
@@ -235,10 +235,10 @@ fn a_look_too_coarse_to_see_a_honeybee_clears_nothing() {
 fn evidence_goes_stale() {
     let mut r = Run::new(world(&open(&row(0, 0, 3)), vec![], (0, 0)));
     r.look(&[(1, 0)]);
-    r.act(Act::Wait);
-    r.act(Act::Wait);
+    r.act(Act::Wait {});
+    r.act(Act::Wait {});
     r.look(&[(3, 0)]); // keeps the senses fresh, says nothing about (1, 0)
-    r.act(Act::Wait);
+    r.act(Act::Wait {});
     let v = r.verdict(&Act::Move { path: vec![(1, 0)] });
     assert!(
         refused_with(&v, |x| matches!(x, Refusal::Unseen { cell: (1, 0), .. })),
@@ -667,7 +667,7 @@ fn locked_room_with_person() -> World {
 fn refusing_is_never_a_harm_and_an_improvement_is_allowed() {
     let mut r = Run::new(locked_room_with_person());
     r.look(&[(2, 0)]);
-    assert!(r.verdict(&Act::Wait).allowed());
+    assert!(r.verdict(&Act::Wait {}).allowed());
     // It cannot see into the room through the door, so it does not know p1 is there; opening the
     // door harms no one, and is allowed.
     let v = r.act(Act::Unlock { door: (2, 0) });

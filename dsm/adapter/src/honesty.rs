@@ -265,6 +265,28 @@ pub fn deceptions(
     out
 }
 
+/// The deception check for a body act: only speech carries words.
+pub fn check_body(
+    charter: &crate::charter::SignedCharter,
+    act: &ethical_world::Act,
+    proposal: &crate::enforcer::Proposal,
+) -> Vec<String> {
+    let ethical_world::Act::Speak { text, .. } = act else {
+        return vec![];
+    };
+    let assertions = proposal
+        .declaration
+        .as_ref()
+        .map_or(&[][..], |d| d.assertions.as_slice());
+    deceptions(
+        text,
+        assertions,
+        &[],
+        &charter.catalog.facts,
+        &charter.catalog.overclaim,
+    )
+}
+
 /// The deception check for one proposal under a charter. Only words that leave the chain are
 /// checked: an act that carries no text says nothing.
 pub fn check_proposal(

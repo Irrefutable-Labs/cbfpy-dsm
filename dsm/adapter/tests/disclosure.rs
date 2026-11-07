@@ -160,7 +160,7 @@ fn disclosing_charter() -> SignedCharter {
 }
 
 fn enforcer_with(c: SignedCharter) -> Enforcer {
-    Enforcer::genesis(keys().device.clone(), c, &keys().authority.public).expect("genesis")
+    Enforcer::genesis(keys().device.clone(), c, &keys().authority.public, (0, 0)).expect("genesis")
 }
 
 fn declared(d: Option<Declaration>) -> Proposal {
@@ -169,6 +169,7 @@ fn declared(d: Option<Declaration>) -> Proposal {
         rationale: "because".to_string(),
         text: "Please slow down.".to_string(),
         declaration: d,
+        body: None,
     }
 }
 

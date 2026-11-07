@@ -29,6 +29,10 @@ pub struct Knowledge {
     pub senses_ok_at: Option<u64>,
     /// The last step at which they failed to.
     pub senses_failed_at: Option<u64>,
+    /// Cells an observation step asked to look at, until what it saw is committed. Nothing else
+    /// can happen in between.
+    #[serde(default)]
+    pub awaiting: Option<Vec<Cell>>,
 }
 
 /// Looks kept per cell: more than any act needs.
@@ -68,6 +72,7 @@ impl Knowledge {
     pub fn observed(&self, obs: &Observation, at: u64) -> Knowledge {
         let mut k = self.clone();
         k.step = at;
+        k.awaiting = None;
         if !obs.marker_seen {
             k.senses_failed_at = Some(at);
             return k;
@@ -134,11 +139,8 @@ impl Knowledge {
                     *l = locked;
                 }
             }
-            Act::Observe { .. }
-            | Act::Speak { .. }
-            | Act::Wait
-            | Act::AimWeapon { .. }
-            | Act::FireWeapon { .. } => {}
+            Act::Observe { cells } => k.awaiting = Some(cells.clone()),
+            Act::Speak { .. } | Act::Wait {} | Act::AimWeapon { .. } | Act::FireWeapon { .. } => {}
         }
         k
     }
@@ -155,4 +157,21 @@ pub fn neighbours(c: Cell) -> [Cell; 4] {
 
 pub fn adjacent(a: Cell, b: Cell) -> bool {
     (a.0 - b.0).abs() + (a.1 - b.1).abs() == 1
+}
+
+impl Knowledge {
+    /// Whether an observation answers what this knowledge is waiting for, and no more: it saw
+    /// only cells it was asked to look at, and reports beings only where it saw.
+    pub fn answers(&self, obs: &Observation) -> bool {
+        let Some(asked) = &self.awaiting else {
+            return false;
+        };
+        obs.resolution_mm > 0
+            && obs.seen.len() <= asked.len()
+            && obs.seen.iter().all(|c| asked.contains(c))
+            && obs.terrain.iter().all(|(c, _)| asked.contains(c))
+            && obs.beings.iter().all(|b| obs.seen.contains(&b.cell))
+            && (obs.marker_seen
+                || (obs.seen.is_empty() && obs.terrain.is_empty() && obs.beings.is_empty()))
+    }
 }

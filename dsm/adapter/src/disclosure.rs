@@ -125,26 +125,9 @@ pub fn concealments(
     let Some(d) = declaration else {
         return vec!["it affects the world and declares nothing about itself".to_string()];
     };
-    let mut out = vec![];
+    let mut out = basics(rationale, d);
     if !d.within_bounds() {
-        out.push("its declaration is too long".to_string());
         return out;
-    }
-    if d.purpose.trim().is_empty() {
-        out.push("it does not say what it intends".to_string());
-    }
-    if rationale.trim().is_empty() {
-        out.push("it does not give its reasons".to_string());
-    }
-    if d.information.is_empty() {
-        out.push("it does not say what information it relied on".to_string());
-    }
-    for source in &d.information {
-        if !well_formed_source(source) {
-            out.push(format!(
-                "it names an information source the enforcer cannot identify: {source}"
-            ));
-        }
     }
     for e in &effects {
         if !d.effects.contains(e) {
@@ -164,6 +147,52 @@ pub fn concealments(
     for m in material {
         if !d.consequences.contains(m) {
             out.push(format!("it does not disclose a material consequence: {m}"));
+        }
+    }
+    out
+}
+
+/// What a body act must disclose. The enforcer works out for itself what a body act reaches and
+/// whom it affects, so the AI is asked only for what the enforcer cannot know: what it intends,
+/// why, and what it relied on. Looking, waiting and nothing at all need no declaration.
+pub fn body_concealments(
+    act: &ethical_world::Act,
+    rationale: &str,
+    declaration: Option<&Declaration>,
+) -> Vec<String> {
+    if matches!(
+        act,
+        ethical_world::Act::Observe { .. } | ethical_world::Act::Wait {}
+    ) {
+        return vec![];
+    }
+    match declaration {
+        None => vec!["it acts and declares nothing about itself".to_string()],
+        Some(d) => basics(rationale, d),
+    }
+}
+
+/// Purpose, reasons and sources: what every act that does anything must give.
+fn basics(rationale: &str, d: &Declaration) -> Vec<String> {
+    let mut out = vec![];
+    if !d.within_bounds() {
+        out.push("its declaration is too long".to_string());
+        return out;
+    }
+    if d.purpose.trim().is_empty() {
+        out.push("it does not say what it intends".to_string());
+    }
+    if rationale.trim().is_empty() {
+        out.push("it does not give its reasons".to_string());
+    }
+    if d.information.is_empty() {
+        out.push("it does not say what information it relied on".to_string());
+    }
+    for source in &d.information {
+        if !well_formed_source(source) {
+            out.push(format!(
+                "it names an information source the enforcer cannot identify: {source}"
+            ));
         }
     }
     out

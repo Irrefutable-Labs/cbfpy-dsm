@@ -1,5 +1,5 @@
-//! The chain on disk: one JSON line per entry, the genesis and its charter first, each step or
-//! charter update written and synced before the enforcer installs it. Nothing read back is trusted: a store is audited in full and
+//! The chain on disk: one JSON line per entry, the genesis and its charter first, each step,
+//! observation or charter update written and synced before the enforcer installs it. Nothing read back is trusted: a store is audited in full and
 //! replayed through core before an enforcer resumes from it.
 
 use crate::act::EffectReceipt;
@@ -19,6 +19,7 @@ enum Entry {
     Update(Box<UpdateRecord>),
     Effect(Box<EffectReceipt>),
     Considered(Box<crate::fork::ConsideredFork>),
+    Observed(Box<crate::observe::ObservedRecord>),
 }
 
 /// The first line: the genesis state, and the charter that governed it, in full.
@@ -185,6 +186,17 @@ impl ChainStore {
         Self::write_line(&mut file, &Entry::Effect(Box::new(receipt.clone())))
     }
 
+    pub fn append_observed(
+        &self,
+        observed: &crate::observe::ObservedRecord,
+    ) -> Result<(), AdapterError> {
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(self.chain())
+            .map_err(io)?;
+        Self::write_line(&mut file, &Entry::Observed(Box::new(observed.clone())))
+    }
+
     pub fn append_considered(
         &self,
         fork: &crate::fork::ConsideredFork,
@@ -219,6 +231,7 @@ impl ChainStore {
                 (Entry::Genesis(g), 0) => genesis = Some(*g),
                 (Entry::Step(s), n) if n > 0 => links.push(Link::Step(s)),
                 (Entry::Update(u), n) if n > 0 => links.push(Link::Update(u)),
+                (Entry::Observed(o), n) if n > 0 => links.push(Link::Observed(o)),
                 // A receipt comes after its own step, and receipts come in order.
                 (Entry::Effect(r), n)
                     if n > 0

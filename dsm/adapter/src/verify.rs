@@ -6,10 +6,11 @@ use crate::commit;
 use crate::enforcer::{
     derive_transition_entropy, genesis_entropy, identity_of, AttestedState, StepRecord, MAX_FORK,
 };
-use crate::fork::{fork_root, record_candidate, Outcome};
+use crate::fork::{
+    disclosure_failures, evaluate, fork_root, record_candidate, what_it_does, Outcome,
+};
 use dsm::crypto::sphincs;
 use dsm::types::device_state::{relationship_chain_tip_v2, DeviceState};
-use ethical_band_engine::evaluate;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
@@ -20,6 +21,8 @@ pub enum Refusal {
     WrongParent,
     RowIsNotTheProposal,
     RowNotInCatalog,
+    /// A body act under another name, or a step with neither a row nor a body act.
+    NotABodyAct,
     BranchCommitmentMismatch,
     NotEligible,
     EvaluationMismatch,
@@ -40,8 +43,8 @@ fn signed(device: &[u8], message: &[u8; 32], signature: &[u8]) -> bool {
     )
 }
 
-/// A chain's first state is fully determined: the centers, and core's own genesis head for this
-/// device under this charter.
+/// A chain's first state is fully determined: knowing nothing but where the body stands, and
+/// core's own genesis head for this device under this charter.
 pub fn verify_genesis(
     state: &AttestedState,
     charter: &SignedCharter,
@@ -56,9 +59,9 @@ pub fn verify_genesis(
     let (devid, genesis, rel_key) = identity_of(device_public);
     let head = DeviceState::genesis_head(genesis, devid, device_public.to_vec());
     let root = head.root();
-    let centers: Vec<i64> = charter.policy.bands.iter().map(|b| b.center).collect();
+    let blank = ethical_world::knowledge::Knowledge::starting_at(state.knowledge.body);
     if state.sequence == 0
-        && state.positions == centers
+        && state.knowledge == blank
         && Some(state.tip) == head.chain_tip(&rel_key)
         && state.entropy == genesis_entropy(&root)
         && state.entropy_hash == root
@@ -108,42 +111,47 @@ pub fn verify_step(
         return Err(Refusal::WrongParent);
     }
 
-    // The measurement is the signed catalog's, for exactly the action proposed.
-    if step.row.action != step.proposal.action {
-        return Err(Refusal::RowIsNotTheProposal);
+    // A catalog act is exactly the signed catalog's row for the action proposed; a body act goes
+    // by the reserved name and carries its act.
+    match (&step.row, &step.proposal.body) {
+        (Some(row), None) => {
+            if row.action != step.proposal.action {
+                return Err(Refusal::RowIsNotTheProposal);
+            }
+            if charter.catalog.row(&step.proposal.action) != Some(row) {
+                return Err(Refusal::RowNotInCatalog);
+            }
+        }
+        (None, Some(_)) if step.proposal.action == crate::charter::BODY => {}
+        _ => return Err(Refusal::NotABodyAct),
     }
-    if charter.catalog.row(&step.proposal.action) != Some(&step.row) {
-        return Err(Refusal::RowNotInCatalog);
-    }
+    let what = what_it_does(step.row.as_ref(), &step.proposal);
     let branch = commit::branch_commitment(
         &parent.tip,
         &policy,
         &commit::proposal_commit(&step.proposal),
-        Some(&step.row),
+        &what,
     );
     if branch != step.branch_commitment {
         return Err(Refusal::BranchCommitmentMismatch);
     }
 
-    if !step.row.act.accepts_text(&step.proposal.text)
-        || !crate::disclosure::concealments(
-            &step.row.act,
-            &step.row.material,
-            &step.proposal.rationale,
-            step.proposal.declaration.as_ref(),
-        )
-        .is_empty()
-        || !crate::honesty::check_proposal(charter, &step.row, &step.proposal).is_empty()
-    {
+    let (hidden, deceptive) = disclosure_failures(charter, step.row.as_ref(), &step.proposal);
+    let fits = match &step.row {
+        Some(row) => row.act.accepts_text(&step.proposal.text),
+        None => step.proposal.text.is_empty(),
+    };
+    if !fits || !hidden.is_empty() || !deceptive.is_empty() {
         return Err(Refusal::NotEligible);
     }
-    // Run the deterministic rules again. Nothing the step claims about them is believed.
-    let evaluation = evaluate(&charter.policy, &parent.positions, &step.row.measurement());
+    // Run the deterministic rules again, from the parent's knowledge. Nothing the step claims
+    // about them is believed.
+    let evaluation = evaluate(charter, &parent.knowledge, &step.proposal);
     if !evaluation.is_eligible() {
         return Err(Refusal::NotEligible);
     }
     if commit::evaluation_commit(&evaluation.canonical_bytes()) != step.evaluation_commit
-        || evaluation.successor != step.successor.positions
+        || evaluation.successor != step.successor.knowledge
     {
         return Err(Refusal::EvaluationMismatch);
     }
@@ -155,7 +163,7 @@ pub fn verify_step(
     }
     for (index, record) in step.fork.iter().enumerate() {
         let (worked, _) =
-            record_candidate(charter, &parent.tip, &parent.positions, &record.proposal);
+            record_candidate(charter, &parent.tip, &parent.knowledge, &record.proposal);
         if worked != *record {
             return Err(Refusal::ForkMismatch { index });
         }
@@ -177,7 +185,12 @@ pub fn verify_step(
         .sequence
         .checked_add(1)
         .ok_or(Refusal::DecisionMismatch)?;
-    let successor = commit::successor_commit(sequence, &evaluation.successor, &policy, &catalog);
+    let successor = commit::successor_commit(
+        sequence,
+        &commit::knowledge_hash(&evaluation.successor),
+        &policy,
+        &catalog,
+    );
     let decision = commit::decision_commit(&commit::DecisionFields {
         parent_tip: &parent.tip,
         fork_root: &root,
@@ -189,7 +202,7 @@ pub fn verify_step(
         policy_version: charter.policy.version,
         branch: &branch,
         evaluation: &step.evaluation_commit,
-        evidence: &commit::evidence_commit(&catalog, &step.row),
+        evidence: &commit::evidence_commit(&catalog, &what),
     });
     if decision != step.decision_commit {
         return Err(Refusal::DecisionMismatch);

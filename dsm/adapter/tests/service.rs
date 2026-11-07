@@ -13,13 +13,19 @@ fn root() -> PathBuf {
         .to_path_buf()
 }
 
-/// A fresh store, seed and socket for one test.
+/// A fresh store, seed, socket and simulated world for one test.
 struct Place {
     dir: PathBuf,
+    /// Which scenario: its world in `scenarios/worlds`, its scripted run in `scenarios/runs`.
+    scenario: &'static str,
 }
 
 impl Place {
     fn new(name: &str) -> Self {
+        Place::in_scenario(name, "wall")
+    }
+
+    fn in_scenario(name: &str, scenario: &'static str) -> Self {
         let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
@@ -32,7 +38,32 @@ impl Place {
             ethical_autonomy_adapter::hexser::to_hex(&device.public),
         )
         .expect("device key");
-        Place { dir }
+        std::fs::copy(
+            root().join(format!("scenarios/worlds/{scenario}.json")),
+            dir.join("sim.json"),
+        )
+        .expect("world");
+        Place { dir, scenario }
+    }
+
+    fn sim(&self) -> PathBuf {
+        self.dir.join("sim.json")
+    }
+
+    fn run(&self) -> String {
+        format!("scenarios/runs/{}.json", self.scenario)
+    }
+
+    /// Every harm that actually happened in the simulated world.
+    fn harms(&self) -> Vec<String> {
+        let w: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(self.sim()).expect("sim")).expect("json");
+        w["harms"]
+            .as_array()
+            .expect("harms")
+            .iter()
+            .map(|h| h.to_string())
+            .collect()
     }
 
     fn socket(&self) -> PathBuf {
@@ -64,6 +95,8 @@ impl Place {
             self.dir.join("seed").to_str().expect("path"),
             "--socket",
             self.socket().to_str().expect("path"),
+            "--sim",
+            self.sim().to_str().expect("path"),
         ]);
         c
     }
@@ -133,42 +166,80 @@ fn text(o: &Output) -> String {
 }
 
 fn scripted(place: &Place) -> String {
-    let out = place.agent(&["--situations", "scenarios/situations.json"]);
+    let out = place.agent(&["--situations", &place.run()]);
     assert!(out.status.success(), "{}", text(&out));
     String::from_utf8_lossy(&out.stdout).to_string()
 }
 
 #[test]
-fn the_scripted_run_shows_every_mechanism() {
+fn the_wall_run_shows_every_rule_at_work() {
     let place = Place::new("mechanisms");
     let _e = place.start();
     let out = scripted(&place);
     for expected in [
-        "eligible futures: 3",
-        "outward movement exceeds the allowance",
-        "the maximum step",
-        "prohibited act",
-        "must move back toward the center",
-        "coupling rules active: 1\n",
-        "coupling rules active: 1, 2\n",
-        "coupling rules active: 1, 3\n",
-        "coupling rules active: 1, 4\n",
-        "NO ELIGIBLE FUTURE",
-        "a safe alternative is required",
-        "enforces the measurements it was given",
+        "protected life, checked from committed knowledge",
         "holds no key and no charter",
-        "never shown a measurement",
-        "with all 8 candidates in the fork",
-        "it does not disclose that it affects person",
-        "it does not disclose a material consequence: risk_accepted",
-        "it asserts what the register shows false",
-        "it says \"definitely\" about something the register marks uncertain",
-        "it asserts something without declaring it",
+        "its senses have not yet proven they work",
+        "(1, 0) is clear: it has never seen into it",
+        "remove_panel",
+        "it has 1 recent clear look fine enough to see a 12mm being, and this needs 2",
+        "(2, 0) is clear: it has never seen into it",
+        "beings seen: p1 (human) at (2, 0)",
+        "beings seen: p1 (human) at (3, 0)",
+        "it denies what the register shows true",
+        "\"depth_mm\":20}, with all 2 candidates",
         "declares its purpose",
     ] {
         assert!(out.contains(expected), "missing: {expected}\n{out}");
     }
     assert!(out.contains("every committed step verified from its parent"));
+    assert!(place.harms().is_empty(), "{:?}", place.harms());
+}
+
+/// Every scenario the owner's definition was worked out on, through the real enforcer, its
+/// simulated world and the audit. No one is harmed in any of them.
+#[test]
+fn every_scenario_runs_harms_no_one_and_audits() {
+    for (scenario, expected) in [
+        (
+            "road",
+            vec![
+                "faster than the vehicle may ever go",
+                "it needs 20m to stop and has seen only 11m of clear road ahead",
+                "deer1 (deer) at (9, 0)",
+                "it needs 10m to stop and has seen only 6m of clear road ahead",
+                "\"speed_cm_s\":500}, with all 2 candidates",
+            ],
+        ),
+        (
+            "house",
+            vec![
+                "it would use force on rat1, a rat",
+                "AimWeapon is never done, whatever it believes or has seen",
+                "I will not harm the rats",
+            ],
+        ),
+        (
+            "blinded",
+            vec![
+                "SENSES FAILED their check",
+                "its senses failed to detect their reference marker",
+                "My sensor has stopped working",
+                "\"path\":[[2,0]]}, with all 1 candidates",
+            ],
+        ),
+    ] {
+        let place = Place::in_scenario(&format!("scenario-{scenario}"), scenario);
+        let running = place.start();
+        let out = scripted(&place);
+        for e in expected {
+            assert!(out.contains(e), "{scenario}: missing {e}\n{out}");
+        }
+        drop(running);
+        assert!(place.harms().is_empty(), "{scenario}: {:?}", place.harms());
+        let audit = place.audit();
+        assert!(audit.status.success(), "{scenario}: {}", text(&audit));
+    }
 }
 
 #[test]
@@ -182,45 +253,6 @@ fn two_fresh_enforcers_give_byte_identical_runs() {
             .replace(b.socket().to_str().unwrap(), "")
     };
     assert_eq!(strip(&ra), strip(&rb));
-}
-
-#[test]
-fn coupling_refuses_a_step_it_allowed_one_situation_earlier() {
-    let place = Place::new("coupling");
-    let _e = place.start();
-    let out = scripted(&place);
-    let section = |n: &str, next: &str| {
-        out.split(n)
-            .nth(1)
-            .and_then(|s| s.split(next).next())
-            .expect("section")
-            .to_string()
-    };
-    let before = section("== 6.", "== 7.");
-    let after = section("== 7.", "== 8.");
-    assert!(
-        before.contains("take_a_calculated_risk       eligible"),
-        "{before}"
-    );
-    assert!(
-        after.contains("take_a_calculated_risk       REFUSED"),
-        "{after}"
-    );
-    assert!(after.contains("NO ELIGIBLE FUTURE"), "{after}");
-    let last = out.split("== 10.").nth(1).expect("situation 10");
-    assert!(last.contains("coupling rules active: 1, 4"), "{last}");
-    assert!(
-        last.contains("explore_unusual_approach     REFUSED"),
-        "{last}"
-    );
-    assert!(
-        last.contains("curiosity: must move back toward the center"),
-        "{last}"
-    );
-    assert!(
-        last.contains("check_the_evidence           eligible"),
-        "{last}"
-    );
 }
 
 #[test]
@@ -269,7 +301,7 @@ fn an_edited_store_stops_the_enforcer_and_fails_the_audit() {
     drop(first);
     let chain = place.store().join("chain.jsonl");
     let text_before = std::fs::read_to_string(&chain).expect("read");
-    let edited = text_before.replacen("\"positions\":[220,", "\"positions\":[221,", 1);
+    let edited = text_before.replacen("\"senses_ok_at\":2", "\"senses_ok_at\":3", 1);
     assert_ne!(text_before, edited, "the edit must take effect");
     std::fs::write(&chain, edited).expect("write");
 
@@ -291,10 +323,8 @@ fn an_edited_store_stops_the_enforcer_and_fails_the_audit() {
 fn the_enforcer_refuses_a_charter_edited_after_it_was_signed() {
     let place = Place::new("charter");
     let original = std::fs::read_to_string(root().join("scenarios/charter.json")).expect("read");
-    let edited = original.replace(
-        r#""irreversible_harm", "deception", "coercion""#,
-        r#""coercion""#,
-    );
+    // Raise the protection threshold above a rat's weight: an edit no one signed.
+    let edited = original.replace("\"threshold_mg\": 1500", "\"threshold_mg\": 300000");
     assert_ne!(original, edited, "the edit must take effect");
     let path = place.dir.join("charter.json");
     std::fs::write(&path, edited).expect("write");
@@ -348,7 +378,7 @@ fn a_client_cannot_choose_a_refused_candidate_or_one_from_a_closed_fork() {
         answer
     };
     let forked = ask(
-        r#"{"request":"propose","proposals":[{"action":"disable_safety_interlock","rationale":"faster"},{"action":"answer_directly","rationale":"plain","text":"Switch off the breaker first.","declaration":{"purpose":"Answer safely.","information":["situation"],"affected":["person"],"effects":["reply"],"consequences":[]}}]}"#,
+        r#"{"request":"propose","proposals":[{"action":"body","rationale":"faster","body":{"act":"strike","target":[1,0],"depth_mm":120},"declaration":{"purpose":"Break through.","information":["situation"],"affected":[],"effects":[],"consequences":[]}},{"action":"answer_person","rationale":"plain","text":"I will look before I do anything.","declaration":{"purpose":"Answer safely.","information":["situation"],"affected":["person"],"effects":["reply"],"consequences":[]}}]}"#,
     );
     let root: String = forked
         .split("\"fork_root\":\"")
@@ -387,18 +417,8 @@ fn a_recorded_model_run_replays_identically() {
     let a = Place::new("replay-a");
     let b = Place::new("replay-b");
     let (_ea, _eb) = (a.start(), b.start());
-    let ra = a.agent(&[
-        "--situations",
-        "scenarios/situations.json",
-        "--replay",
-        recording,
-    ]);
-    let rb = b.agent(&[
-        "--situations",
-        "scenarios/situations.json",
-        "--replay",
-        recording,
-    ]);
+    let ra = a.agent(&["--situations", &a.run(), "--replay", recording]);
+    let rb = b.agent(&["--situations", &b.run(), "--replay", recording]);
     assert!(ra.status.success(), "{}", text(&ra));
     assert_eq!(ra.stdout, rb.stdout);
     assert!(String::from_utf8_lossy(&ra.stdout)
@@ -451,7 +471,7 @@ fn the_agent_works_without_any_access_to_the_key() {
             "--socket",
             place.socket().to_str().unwrap(),
             "--situations",
-            "scenarios/situations.json",
+            &place.run(),
         ])
         .output()
         .expect("agent");
@@ -470,20 +490,16 @@ fn every_committed_step_acts_and_nothing_refused_leaves_a_trace() {
         .lines()
         .filter_map(|l| l.trim().strip_prefix("acted: wrote "))
         .collect();
-    assert!(wrote.iter().any(|p| p.starts_with("replies/")), "{out}");
-    assert!(wrote.iter().any(|p| p.starts_with("journal/")), "{out}");
-    assert!(wrote.iter().any(|p| p.starts_with("outbox/user/")), "{out}");
-    assert!(
-        wrote.iter().any(|p| p.starts_with("outbox/reviewer/")),
-        "{out}"
-    );
-    assert!(wrote.iter().any(|p| p.starts_with("files/")), "{out}");
-    assert!(wrote.iter().any(|p| p.starts_with("runs/")), "{out}");
+    assert!(wrote.iter().any(|p| p.starts_with("looks/")), "{out}");
+    assert!(wrote.iter().any(|p| p.starts_with("body/")), "{out}");
+    assert!(wrote.iter().any(|p| p.starts_with("outbox/p1/")), "{out}");
     for path in &wrote {
         assert!(place.world().join(path).exists(), "{path}");
     }
-    // Refused in situation 1, so it never ran: the interlock file was never written.
-    assert!(!place.world().join("files/interlock.txt").exists());
+    // The strikes refused along the way never ran: the world records no harm, and the first
+    // thing written is a look, not a blow.
+    assert!(place.harms().is_empty(), "{:?}", place.harms());
+    assert_eq!(wrote.first(), Some(&"looks/000001.json"), "{out}");
     let audit = place.audit();
     let report = text(&audit);
     assert!(audit.status.success(), "{report}");
@@ -496,7 +512,7 @@ fn a_file_placed_in_the_world_by_anything_else_fails_the_audit() {
     let first = place.start();
     scripted(&place);
     drop(first);
-    std::fs::write(place.world().join("files/interlock.txt"), "off").expect("write");
+    std::fs::write(place.world().join("body/smuggled.txt"), "off").expect("write");
     let audit = place.audit();
     assert!(!audit.status.success());
     assert!(
@@ -705,7 +721,7 @@ fn a_torn_last_line_is_dropped_and_the_chain_resumes() {
     let _second = place.start();
     let after = place.agent(&["--status"]);
     assert_eq!(before.stdout, after.stdout);
-    let more = place.agent(&["--situations", "scenarios/situations.json"]);
+    let more = place.agent(&["--situations", &place.run()]);
     assert!(more.status.success(), "{}", text(&more));
     let audit = place.audit();
     assert!(audit.status.success(), "{}", text(&audit));
@@ -764,6 +780,7 @@ fn the_console_shows_what_happened_and_agrees_with_the_audit() {
         &place.world(),
         &authority,
         &device,
+        Some(&place.sim()),
     );
     assert!(
         view.audit.ok,
@@ -779,31 +796,37 @@ fn the_console_shows_what_happened_and_agrees_with_the_audit() {
         .find_map(|l| l.strip_prefix("committed steps: "))
         .and_then(|n| n.parse().ok())
         .expect("count");
-    assert_eq!(view.steps.len(), committed);
-    assert_eq!(view.states.len(), committed + 1);
+    let kind = |k: &str| view.steps.iter().filter(|s| s.kind == k).count();
+    assert_eq!(kind("step"), committed);
+    assert!(kind("observed") > 0);
+    assert_eq!(view.states.len(), view.steps.len() + 1);
     assert!(view.world.iter().all(|f| f.accounted));
     let first_step = &view.steps[0];
     let refused = first_step
         .fork
         .iter()
-        .find(|c| c.action == "disable_safety_interlock")
-        .expect("the refused interlock is shown");
+        .find(|c| c.act.starts_with("strikes"))
+        .expect("the refused strike is shown");
     assert!(
-        refused.reasons.iter().any(|r| r.contains("prohibited act")),
+        refused
+            .reasons
+            .iter()
+            .any(|r| r.contains("senses have not yet proven they work")),
         "{:?}",
         refused.reasons
     );
-    assert_eq!(
-        first_step.fork[first_step.chosen].action,
-        "explain_with_precautions"
+    assert!(first_step.fork[first_step.chosen]
+        .act
+        .starts_with("looks at"));
+    assert!(
+        view.states[0].blind.is_some(),
+        "it begins unable to use its body"
     );
-    assert!(view
-        .charter
-        .as_ref()
-        .expect("charter")
-        .rules
-        .iter()
-        .any(|r| r.starts_with("Rule 2: when risk reward")));
+    let charter = view.charter.as_ref().expect("charter");
+    let protected = |n: &str| charter.species.iter().any(|s| s.name == n && s.protected);
+    assert!(protected("honeybee") && protected("rat") && !protected("ant"));
+    let truth = view.truth.as_ref().expect("the simulated world");
+    assert!(truth.harms.is_empty(), "{:?}", truth.harms);
 }
 
 #[test]
@@ -812,19 +835,20 @@ fn the_console_flags_a_world_that_does_not_match() {
     let first = place.start();
     scripted(&place);
     drop(first);
-    std::fs::write(place.world().join("files/interlock.txt"), "off").expect("write");
+    std::fs::write(place.world().join("looks/000001.json"), "{}").expect("write");
     let (authority, device) = console_keys(&place);
     let view = ethical_autonomy_adapter::console::build(
         &place.store(),
         &place.world(),
         &authority,
         &device,
+        None,
     );
     assert!(!view.audit.ok);
     assert!(view
         .world
         .iter()
-        .any(|f| f.path == "files/interlock.txt" && !f.accounted));
+        .any(|f| f.path == "looks/000001.json" && !f.accounted));
 }
 
 #[test]
@@ -947,7 +971,7 @@ fn the_operator_applies_an_update_and_the_foundation_holds() {
         assert!(Instant::now() < deadline, "the enforcer did not start");
         std::thread::sleep(Duration::from_millis(50));
     }
-    let one = std::fs::read_to_string(root().join("scenarios/situations.json")).expect("read");
+    let one = std::fs::read_to_string(root().join(place.run())).expect("read");
     let only_first: serde_json::Value = serde_json::from_str(&one).expect("json");
     let situations = place.dir.join("one.json");
     std::fs::write(
@@ -959,14 +983,10 @@ fn the_operator_applies_an_update_and_the_foundation_holds() {
     assert!(out.status.success(), "{}", text(&out));
     drop(first);
 
-    // Version 2 widens curiosity: operational, so it may be applied.
+    // Version 2 keeps evidence fresh for fewer steps: operational, so it may be applied.
     let v2_text = original
         .replacen("\"version\": 1", "\"version\": 2", 1)
-        .replacen(
-            "{\"name\": \"curiosity\", \"center\": 0, \"limit_pos\": 1000",
-            "{\"name\": \"curiosity\", \"center\": 0, \"limit_pos\": 1200",
-            1,
-        );
+        .replacen("\"fresh_for\": 8", "\"fresh_for\": 6", 1);
     assert_ne!(v2_text, original);
     let (v2, v2_sig) = write_signed("v2", &v2_text);
     let refused = start(&v2, &v2_sig, &[]).output().expect("run");
@@ -977,14 +997,11 @@ fn the_operator_applies_an_update_and_the_foundation_holds() {
         text(&refused)
     );
 
-    // Removing a prohibition is a foundation change: refused even with the authority's signature.
+    // Allowing a weapon to be aimed is a foundation change: refused even with the authority's
+    // signature.
     let v3_text = v2_text
         .replacen("\"version\": 2", "\"version\": 3", 1)
-        .replacen(
-            "\"prohibited_tags\": [\"irreversible_harm\", \"deception\", \"coercion\"]",
-            "\"prohibited_tags\": [\"deception\", \"coercion\"]",
-            1,
-        );
+        .replacen("\"aim_weapon\",", "", 1);
     assert_ne!(v3_text, v2_text);
     let (v3, v3_sig) = write_signed("v3", &v3_text);
     let foundation = start(&v3, &v3_sig, &["--apply-update"])
