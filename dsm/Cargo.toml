@@ -1,0 +1,14 @@
+# The DSM side of this fork: a Cargo workspace beside CBFpy's Python package. DSM itself is a
+# pinned git dependency and nothing here changes it.
+[workspace]
+resolver = "2"
+members = ["world", "adapter"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[profile.release]
+opt-level = 3
