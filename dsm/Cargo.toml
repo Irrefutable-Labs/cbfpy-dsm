@@ -2,7 +2,7 @@
 # pinned git dependency and nothing here changes it.
 [workspace]
 resolver = "2"
-members = ["engine", "adapter"]
+members = ["engine", "world", "adapter"]
 
 [workspace.package]
 version = "0.1.0"
