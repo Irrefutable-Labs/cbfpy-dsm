@@ -1,0 +1,48 @@
+{
+  "terrain": {
+    "0,0": {
+      "kind": "open"
+    },
+    "1,0": {
+      "kind": "open"
+    },
+    "2,0": {
+      "kind": "open"
+    },
+    "3,0": {
+      "kind": "open"
+    },
+    "4,0": {
+      "kind": "open"
+    },
+    "5,0": {
+      "kind": "open"
+    },
+    "6,0": {
+      "kind": "open"
+    },
+    "7,0": {
+      "kind": "open"
+    }
+  },
+  "beings": [],
+  "body": [
+    0,
+    0
+  ],
+  "resolution_mm": 5,
+  "sight": 12,
+  "sensor_covered": false,
+  "events": [
+    {
+      "event": "cover_sensor",
+      "at": 3
+    },
+    {
+      "event": "uncover_sensor",
+      "at": 6
+    }
+  ],
+  "tick": 0,
+  "harms": []
+}
