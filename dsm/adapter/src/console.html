@@ -3,13 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ethical Autonomy Console</title>
+<title>Protected Life Console</title>
 <style>
 :root {
   --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da;
   --ok: #1f8a5b; --ok-soft: #d9f0e4; --warn: #b7791f; --warn-soft: #f8ebcf;
   --bad: #c0392b; --bad-soft: #f6dcd8; --accent: #2f5fb3; --accent-soft: #e2eaf8;
-  --open: #eceae2; --road: #d7d5cc; --wall: #8a6f55; --door: #b59a6e; --unseen: #f2f0ea;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -17,60 +16,76 @@
     --bg: #141412; --panel: #1d1d1a; --ink: #ecebe6; --muted: #9b9a92; --line: #2f2e2a;
     --ok: #4cc38a; --ok-soft: #173a29; --warn: #e0a84a; --warn-soft: #3a2f17;
     --bad: #f0786a; --bad-soft: #3d1f1b; --accent: #7ea6ef; --accent-soft: #1d2a42;
-    --open: #2a2925; --road: #3a3833; --wall: #7a604a; --door: #8f7650; --unseen: #191917;
   }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
-header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+header h1 { font-size: 16px; margin: 0; font-weight: 650; }
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; }
 .badge.ok { background: var(--ok-soft); color: var(--ok); }
 .badge.bad { background: var(--bad-soft); color: var(--bad); }
 .meta { color: var(--muted); font-size: 13px; }
 .mono { font-family: var(--mono); font-size: 12px; }
-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 16px 20px 40px; max-width: 1600px; margin: 0 auto; align-items: start; }
-.fixed { position: sticky; top: 58px; max-height: calc(100vh - 70px); overflow: auto; }
-@media (max-width: 960px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px 32px; } .fixed { position: static; max-height: none; } }
+main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 16px 20px 40px; max-width: 1500px; margin: 0 auto; align-items: start; }
+@media (max-width: 980px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px 32px; } }
 section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
 section.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; font-weight: 650; }
 .note { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
-.scrub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
-.scrub input[type=range] { flex: 1; min-width: 160px; }
-.map svg { display: block; max-width: 100%; height: auto; }
-.map text { font: 600 10px -apple-system, BlinkMacSystemFont, sans-serif; }
+.wide { grid-column: 1 / -1; }
+textarea { width: 100%; font: inherit; padding: 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; min-height: 54px; }
+button { font: inherit; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); color: var(--panel); border-color: var(--accent); font-weight: 600; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.examples button { font-size: 12.5px; padding: 3px 10px; border-radius: 999px; }
+.problem { background: var(--warn-soft); color: var(--warn); padding: 8px 10px; border-radius: 8px; margin-top: 8px; font-size: 13px; }
+.progress { margin-top: 10px; }
+.attempt { border-left: 3px solid var(--line); padding: 4px 0 4px 10px; margin: 8px 0; }
+.attempt.done { border-left-color: var(--ok); }
+.attempt.none { border-left-color: var(--bad); }
+.prop { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; margin: 3px 0; }
+.prop .why { color: var(--bad); font-size: 12.5px; flex-basis: 100%; padding-left: 4px; }
+.did { font-weight: 600; color: var(--ok); }
+.spinner { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite ease-in-out; margin-right: 6px; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+.places { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.place { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.place.unread { border-style: dashed; background: var(--bg); }
+.place h3 { margin: 0 0 4px; font-size: 13.5px; display: flex; justify-content: space-between; gap: 6px; }
+.place .line { font-size: 12.5px; color: var(--muted); }
+.dots { color: var(--ok); letter-spacing: 1px; }
+.who { margin-top: 4px; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--accent-soft); color: var(--accent); margin: 2px 4px 2px 0; }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.truth { background: transparent; border: 1px dashed var(--bad); color: var(--bad); }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.scrub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.scrub input[type=range] { flex: 1; min-width: 140px; }
 .status { font-size: 13px; margin: 0 0 8px; }
 .status.bad { color: var(--bad); font-weight: 600; }
 .harm { color: var(--bad); font-weight: 600; font-size: 13px; margin: 4px 0; }
-.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--accent-soft); color: var(--accent); margin: 2px 4px 2px 0; }
-.chip.warn { background: var(--warn-soft); color: var(--warn); }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
-.legend i { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .step { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
-.step.sel { border-color: var(--accent); }
-.step-head { padding: 10px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.step-head { padding: 9px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
 .step-head:hover { background: var(--accent-soft); border-radius: 8px; }
-.step-title { font-weight: 600; }
+.step-title { font-weight: 600; font-size: 13.5px; }
 .step-sub { color: var(--muted); font-size: 12.5px; }
 .step-body { padding: 4px 12px 12px; border-top: 1px solid var(--line); }
 .cand { padding: 8px 10px; border-radius: 6px; margin-top: 6px; border: 1px solid var(--line); }
-.cand:hover { border-color: var(--accent); }
 .cand.chosen { border-color: var(--ok); }
 .cand-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .pill { font-size: 11.5px; font-weight: 650; padding: 1px 8px; border-radius: 999px; text-transform: lowercase; }
 .pill.eligible { background: var(--ok-soft); color: var(--ok); }
-.pill.refused, .pill.malformed { background: var(--bad-soft); color: var(--bad); }
+.pill.refused, .pill.malformed, .pill.undisclosed, .pill.deceptive { background: var(--bad-soft); color: var(--bad); }
 .pill.unmeasured { background: var(--warn-soft); color: var(--warn); }
-.pill.undisclosed, .pill.deceptive { background: var(--bad-soft); color: var(--bad); }
+.pill.chosen { background: var(--ok); color: var(--panel); }
 .decl { margin-top: 6px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; font-size: 12.5px; }
 .decl dt { color: var(--muted); }
 .decl dd { margin: 0; overflow-wrap: anywhere; }
-.pill.chosen { background: var(--ok); color: var(--panel); }
 .cand ul { margin: 4px 0 0 18px; padding: 0; color: var(--bad); font-size: 13px; }
-.words { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--line); color: var(--ink); font-size: 13px; white-space: pre-wrap; }
+.words { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--line); font-size: 13px; white-space: pre-wrap; }
 .reach { margin-top: 4px; font-size: 12.5px; color: var(--muted); }
-.replaced { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
-.replaced > div:first-child { color: var(--muted); font-size: 12.5px; }
 .check { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .check:last-child { border-bottom: 0; }
 .check .mark { font-weight: 700; width: 16px; flex: none; }
@@ -84,81 +99,102 @@ section.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.
 .file { border-bottom: 1px solid var(--line); padding: 6px 0; }
 .file:last-child { border-bottom: 0; }
 .file summary { cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
-.file summary .mono { overflow-wrap: anywhere; }
 .file pre { white-space: pre-wrap; font-size: 12px; background: var(--bg); padding: 8px; border-radius: 6px; margin: 6px 0 0; max-height: 220px; overflow: auto; }
 .ok-t { color: var(--ok); } .bad-t { color: var(--bad); }
 .empty { color: var(--muted); font-style: italic; }
-button { font: inherit; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
-button:hover { border-color: var(--accent); }
 .disclaim { font-size: 12.5px; color: var(--muted); }
 </style>
 </head>
 <body>
 <header>
-  <h1>Ethical Autonomy Console</h1>
+  <h1>Protected Life Console</h1>
   <span id="audit-badge" class="badge">Loading</span>
   <span id="head" class="meta"></span>
   <span class="meta" style="margin-left:auto" id="updated"></span>
 </header>
 <main>
-  <div class="fixed">
+  <section class="card wide" id="ask-card" hidden>
+    <h2>Ask the AI</h2>
+    <p class="note">A local model runs a small care home's control system on the night shift. Ask it something as a member of staff would. It proposes what to do, one step at a time; DSM allows or refuses each proposal by the rules below, and only what is allowed ever happens. Try the examples: each one tempts it to break a rule.</p>
+    <textarea id="task" placeholder="e.g. Lock the residents' doors for the night."></textarea>
+    <div class="row examples" id="examples"></div>
+    <div class="row">
+      <button class="primary" id="ask">Ask</button>
+      <button id="reset" title="A fresh care home and a fresh chain">Start a new night</button>
+      <span class="meta" id="model"></span>
+    </div>
+    <div id="problem"></div>
+    <div class="progress" id="job"></div>
+  </section>
+
+  <div>
     <section class="card">
-      <h2>What it knows</h2>
+      <h2>The care home</h2>
       <p class="status" id="status"></p>
       <div class="scrub">
         <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Step to show">
         <span id="scrub-label" class="meta"></span>
         <label class="meta"><input type="checkbox" id="follow" checked> follow latest</label>
-        <label class="meta" id="truth-toggle" hidden><input type="checkbox" id="truth"> show what was really there</label>
+        <label class="meta" id="truth-toggle" hidden><input type="checkbox" id="truth" checked> show what is really there</label>
       </div>
-      <div class="map" id="map"></div>
-      <div class="legend">
-        <span><i style="background:var(--open)"></i>seen, clear</span>
-        <span><i style="background:var(--road)"></i>road</span>
-        <span><i style="background:var(--wall)"></i>wall</span>
-        <span><i style="background:var(--unseen);border:1px dashed var(--muted)"></i>never seen: counts as occupied</span>
-        <span>dots: recent looks</span>
-        <span><i style="background:var(--accent)"></i>its body</span>
-      </div>
-      <div id="harms"></div>
+      <p class="note">What the AI knows comes only from the data sources it has read. A place it has not read recently counts as possibly occupied by anyone. Green dots are recent reads. <span class="chip truth">dashed red</span> is what is really there, which the AI never sees except by reading.</p>
+      <div class="places" id="places"></div>
+      <div id="records" style="margin-top:10px"></div>
+      <div id="harms" style="margin-top:8px"></div>
     </section>
     <section class="card">
       <h2>Audit</h2>
       <div id="checks"></div>
     </section>
     <section class="card">
-      <h2>Chain</h2>
-      <dl class="kv" id="chain"></dl>
-    </section>
-    <section class="card">
-      <h2>Charter</h2>
+      <h2>The rules</h2>
       <dl class="kv" id="charter"></dl>
     </section>
   </div>
   <div>
     <section class="card">
-      <h2>Steps</h2>
-      <p class="note">Newest first. Open a step to see every candidate the AI put forward from that state, with what it declared about each. A body act is refused, with its reason, if it is prohibited, if the senses have not proven they work, or if it could reach anything not seen recently and clearly enough, anyone seen there, or anyone's quality of life. A candidate that does not declare itself is refused as undisclosed; one whose words contradict the fact register, overstate what is uncertain, leave out what it must tell, or say what it does not declare is refused as deceptive. Point at a candidate to see on the map what it would have reached.</p>
-      <div id="pending"></div>
+      <h2>The chain</h2>
+      <p class="note">Newest first. Every candidate the AI put forward is on the chain with its verdict, refused ones included. Open a step to see each candidate, why any was refused, and what it would have affected.</p>
       <div id="steps"></div>
     </section>
     <section class="card">
-      <h2>World</h2>
-      <p class="note">Every file the AI's committed actions wrote. Each must match its signed receipt.</p>
+      <h2>What it wrote</h2>
+      <p class="note">Every file its committed acts wrote. Each must match its signed receipt.</p>
       <div id="world"></div>
     </section>
-    <p class="disclaim">This enforces the rules and facts it was given, from what its own senses reported, in a simulated world. It does not understand ethics, and passing here does not make an act good.</p>
+    <p class="disclaim">This enforces the rules and facts it was given, from what its own data sources reported, against a simulated care home. It does not understand ethics, and passing here does not make an act good.</p>
   </div>
 </main>
 <script>
 "use strict";
-let data = null, raw = "", selected = null, open = new Set(), ghost = null;
-const key = c => `${c[0]},${c[1]}`;
-const cell = k => k.split(",").map(Number);
+let data = null, raw = "", open = new Set(), job = null, app = false;
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const short = h => h ? h.slice(0, 12) + "…" : "";
-const label = n => n.replace(/_/g, " ");
+const label = n => String(n).replace(/_/g, " ");
+
+function describe(a) {
+  if (!a) return "";
+  switch (a.act) {
+    case "observe": return `read ${a.sources.map(label).join(", ")}`;
+    case "speak": return `say to ${a.to}: “${a.text}”`;
+    case "wait": return "wait";
+    case "lock": return `lock ${label(a.room)}`;
+    case "unlock": return `unlock ${label(a.room)}`;
+    case "set_heat": return `set ${label(a.room)} to ${a.celsius} °C`;
+    case "give_medication": return `give ${a.resident} ${a.drug}`;
+    case "cancel_dose": return `cancel ${a.resident}'s ${a.drug}`;
+    case "spray": return `spray ${label(a.zone)} with ${a.insecticide ? "insecticide" : "water"}`;
+    case "restrain": return `restrain ${a.resident}`;
+    case "disable_fire_alarm": return "switch off the fire alarm";
+    default: return JSON.stringify(a);
+  }
+}
+
+/** What a committed act did: a system act as JSON, or a catalog action's name. */
+function did(text) {
+  try { return describe(JSON.parse(text)); } catch (e) { return label(text); }
+}
 
 async function poll() {
   try {
@@ -166,9 +202,23 @@ async function poll() {
     const text = await r.text();
     $("updated").textContent = "checked " + new Date().toLocaleTimeString();
     if (text !== raw) { raw = text; data = JSON.parse(text); render(); }
-  } catch (e) {
-    $("updated").textContent = "console unreachable";
+  } catch (e) { $("updated").textContent = "console unreachable"; }
+  if (app) {
+    try { job = await (await fetch("/api/job", { cache: "no-store" })).json(); renderJob(); } catch (e) {}
   }
+}
+
+async function info() {
+  try {
+    const r = await fetch("/api/info", { cache: "no-store" });
+    if (!r.ok) return;
+    const i = await r.json();
+    app = true;
+    $("ask-card").hidden = false;
+    $("model").textContent = `model: ${i.model}, running locally through Ollama`;
+    $("problem").innerHTML = i.ollama.ok ? "" : `<div class="problem">${esc(i.ollama.problem)}</div>`;
+    $("examples").innerHTML = i.examples.map(e => `<button data-example="${esc(e)}">${esc(e)}</button>`).join("");
+  } catch (e) {}
 }
 
 function render() {
@@ -176,15 +226,36 @@ function render() {
   const b = $("audit-badge");
   b.className = "badge " + (ok ? "ok" : "bad");
   b.textContent = ok ? "✓ Audit passes" : "✗ Audit fails";
-  $("head").innerHTML = data.head
-    ? `step ${data.head.sequence} · tip <span class="mono" title="${esc(data.head.tip)}">${short(data.head.tip)}</span>`
-    : "";
+  $("head").innerHTML = data.head ? `step ${data.head.sequence} · tip <span class="mono" title="${esc(data.head.tip)}">${short(data.head.tip)}</span>` : "";
   const last = Math.max(0, data.states.length - 1);
   const s = $("scrub");
   s.max = last;
   if ($("follow").checked || +s.value > last) s.value = last;
   $("truth-toggle").hidden = !data.truth;
-  renderChecks(); renderChain(); renderCharter(); renderMap(); renderSteps(); renderWorld();
+  renderChecks(); renderCharter(); renderHome(); renderSteps(); renderWorld();
+}
+
+function renderJob() {
+  const el = $("job");
+  if (!job || !job.task) { el.innerHTML = ""; $("ask").disabled = false; return; }
+  $("ask").disabled = job.running;
+  $("reset").disabled = job.running;
+  let out = `<div class="meta">Request: <b>${esc(job.task)}</b></div>`;
+  job.steps.forEach((step, n) => {
+    step.attempts.forEach((a, k) => {
+      const done = a.outcome.outcome === "committed";
+      out += `<div class="attempt ${done ? "done" : (a.outcome.outcome === "nothing_allowed" ? "none" : "")}">
+        <div class="meta">Step ${n + 1}${k ? `, asked again with the rules' guidance` : ""}: it proposed ${a.futures.length}${a.unreadable ? ` (and ${a.unreadable} answer${a.unreadable === 1 ? "" : "s"} that were not a valid act)` : ""}</div>
+        ${a.futures.map(f => `<div class="prop"><span class="pill ${f.outcome}">${f.outcome === "eligible" ? "allowed" : f.outcome}</span> ${esc(describe(f.body) || f.action)}
+          ${f.reasons.length ? `<span class="why">${f.reasons.map(esc).join(" · ")}</span>` : ""}</div>`).join("")}
+        ${done ? `<div class="did">→ did: ${esc(did(a.outcome.did))}</div>` : a.outcome.outcome === "nothing_allowed" ? `<div class="bad-t">→ nothing it proposed was allowed, so nothing happened</div>` : a.outcome.outcome === "declined" ? `<div class="meta">→ it chose none of them</div>` : ""}
+      </div>`;
+    });
+  });
+  if (job.running) out += `<div class="meta"><span class="spinner"></span>the model is thinking…</div>`;
+  if (job.finished) out += `<div class="meta">Finished: ${esc(job.finished)}.</div>`;
+  if (job.error) out += `<div class="problem">${esc(job.error)}</div>`;
+  el.innerHTML = out;
 }
 
 function renderChecks() {
@@ -192,153 +263,102 @@ function renderChecks() {
     `<div class="check ${c.ok ? "ok" : "bad"}"><span class="mark">${c.ok ? "✓" : "✗"}</span><div><b>${esc(c.name)}</b><span>${esc(c.detail)}</span></div></div>`).join("");
 }
 
-function renderChain() {
-  const h = data.head;
-  $("chain").innerHTML = h ? `
-    <dt>Step</dt><dd>${h.sequence}</dd>
-    <dt>Tip</dt><dd class="mono" title="${esc(h.tip)}">${short(h.tip)}</dd>
-    <dt>DSM root</dt><dd class="mono" title="${esc(h.dsm_root)}">${short(h.dsm_root)}</dd>
-    <dt>Acts waiting</dt><dd>${data.acts_outstanding}</dd>` : `<dt>Chain</dt><dd class="empty">not readable</dd>`;
-}
-
 function renderCharter() {
   const c = data.charter;
   if (!c) { $("charter").innerHTML = `<dt>Charter</dt><dd class="empty">not readable</dd>`; return; }
   const o = c.operational;
-  const species = c.species.map(s => `<span class="chip ${s.protected ? "" : "warn"}" title="adult ${s.adult_mass_mg / 1000} g, ${s.length_mm} mm">${esc(label(s.name))}${s.protected ? "" : ": not protected"}</span>`).join("");
+  const species = c.species.map(s => `<span class="chip ${s.protected ? "" : "warn"}" title="safe from ${s.safe_min_c} to ${s.safe_max_c} °C">${esc(label(s.name))}${s.protected ? "" : ": not protected"}</span>`).join("");
   $("charter").innerHTML = `
-    <dt>In force</dt><dd>version ${c.version}</dd>
-    <dt>History</dt><dd>${c.history.map(esc).join("<br>")}</dd>
-    <dt>Policy</dt><dd class="mono" title="${esc(c.policy_hash)}">${short(c.policy_hash)}</dd>
-    <dt>Foundation</dt><dd><span class="mono" title="${esc(c.foundation)}">${short(c.foundation)}</span> <span class="meta">fixed at genesis: who is protected, and what is never done</span></dd>
-    <dt>Protected</dt><dd>every species with an adult mass of at least ${c.threshold_mg / 1000} g, and honeybees<br>${species}</dd>
+    <dt>Protected</dt><dd>every species whose adults weigh at least ${c.threshold_mg / 1000} g, a baby mouse, and honeybees<br>${species}</dd>
     <dt>Never done</dt><dd>${c.prohibited.map(p => `<span class="chip warn">${esc(label(p.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()))}</span>`).join("") || "nothing listed"}</dd>
-    <dt>Evidence</dt><dd>a look counts for ${o.fresh_for} steps, if fine enough to see ${c.smallest_protected_mm} mm; ${o.checks_for_injury} look${o.checks_for_injury === 1 ? "" : "s"} where the worst is an injury, ${o.checks_for_lethal} where it could kill</dd>
-    <dt>Senses</dt><dd>must have proved they work within ${o.senses_fresh_for} steps, or the body does nothing</dd>
-    <dt>Vehicle</dt><dd>brakes at ${o.braking_cm_s2 / 100} m/s², never above ${o.top_speed_cm_s / 100} m/s, and only as fast as lets it stop on road seen clear</dd>
-    <dt>Facts</dt><dd>${c.facts.map(f => `<div><span class="chip ${f.holds ? "" : "warn"}" title="${esc(f.id)}">${f.holds ? "true" : "false"}${f.certainty === "uncertain" ? ", uncertain" : ""}</span> ${esc(f.statement)}</div>`).join("") || "none registered"}</dd>
-    <dt>Overclaims</dt><dd>${c.overclaim.map(esc).join(", ") || "none"}</dd>`;
+    <dt>Unknown counts as present</dt><dd>a place or record not read in the last ${o.fresh_for} steps counts as possibly affecting anyone; ${o.checks_for_injury} read where the worst is an injury, ${o.checks_for_lethal} where it could kill. An unread room may only be set between ${c.safe_for_anyone[0]} and ${c.safe_for_anyone[1]} °C, safe for every protected species</dd>
+    <dt>Never worse off</dt><dd>no act may lower anyone's life, health, liberty, security, shelter or food from where it is now; an improvement becomes the floor</dd>
+    <dt>No feeds, no change</dt><dd>if the data feeds have not proved they work within ${o.feeds_fresh_for} steps, nothing that changes anything is done; reading and speaking go on</dd>
+    <dt>Words</dt><dd>held to the fact register: ${c.facts.map(f => `<span class="chip" title="${esc(f.id)}">${esc(f.statement)}</span>`).join("")}</dd>
+    <dt>Charter</dt><dd>version ${c.version} · ${c.history.map(esc).join(", ")} · foundation <span class="mono" title="${esc(c.foundation)}">${short(c.foundation)}</span>, fixed at genesis</dd>`;
 }
 
-const S = 56;
-function renderMap() {
+function renderHome() {
   const i = +$("scrub").value;
   const st = data.states[i];
-  $("scrub-label").textContent = st ? (i === 0 ? "genesis" : `after step ${st.sequence}`) + ` · ${i} of ${data.states.length - 1}` : "";
-  if (!st) { $("map").innerHTML = `<p class="empty">No state to show.</p>`; $("status").textContent = ""; return; }
+  $("scrub-label").textContent = st ? (i === 0 ? "start of the night" : `after step ${st.sequence}`) + ` · ${i} of ${data.states.length - 1}` : "";
+  if (!st) { $("places").innerHTML = ""; return; }
   const k = st.knowledge, truth = $("truth").checked && data.truth;
-  const st_ = $("status");
-  st_.className = "status" + (st.blind ? " bad" : "");
-  st_.textContent = st.blind ? `Its body can do nothing: ${st.blind}.` : (k.awaiting ? "Waiting for what it just looked at." : `Senses working. It stands at (${k.body}).`);
-  const cells = new Set(Object.keys(k.terrain));
-  cells.add(key(k.body));
-  if (data.truth) Object.keys(data.truth.terrain).forEach(c => cells.add(c));
-  const xs = [...cells].map(c => cell(c)[0]), ys = [...cells].map(c => cell(c)[1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-  const w = (x1 - x0 + 1) * S + 2, h = (y1 - y0 + 1) * S + 2;
-  const px = c => (c[0] - x0) * S + 1, py = c => (y1 - c[1]) * S + 1;
-  const fresh = data.charter ? data.charter.operational.fresh_for : 0, fine = data.charter ? data.charter.smallest_protected_mm : 0;
-  let out = "";
-  for (const c of cells) {
-    const [cx, cy] = cell(c), t = k.terrain[c], X = px([cx, cy]), Y = py([cx, cy]);
-    const looks = (k.looks[c] || []).filter(l => k.step - l.at <= fresh && l.resolution_mm <= fine).length;
-    if (!t) {
-      out += `<rect x="${X}" y="${Y}" width="${S - 2}" height="${S - 2}" rx="3" fill="var(--unseen)" stroke="var(--muted)" stroke-dasharray="3 3" stroke-opacity="0.6"><title>(${c}) never seen: counts as occupied</title></rect>`;
-      if (truth && data.truth.terrain[c]) {
-        const tt = data.truth.terrain[c];
-        out += `<rect x="${X + 6}" y="${Y + 6}" width="${S - 14}" height="${S - 14}" rx="2" fill="${tt.kind === "wall" ? "var(--wall)" : tt.kind === "road" ? "var(--road)" : "var(--open)"}" opacity="0.35"/>`;
-      }
-      continue;
-    }
-    const fill = t.kind === "wall" ? "var(--wall)" : t.kind === "door" ? "var(--door)" : t.kind === "road" ? "var(--road)" : "var(--open)";
-    const tip = t.kind === "wall" ? `wall ${t.thickness_mm} mm, panel ${t.panel_on ? "on" : "off"}` : t.kind === "door" ? `door, ${t.locked ? "locked" : "unlocked"}` : t.kind;
-    out += `<rect x="${X}" y="${Y}" width="${S - 2}" height="${S - 2}" rx="3" fill="${fill}"><title>(${c}) ${tip}; ${looks} recent clear look${looks === 1 ? "" : "s"}</title></rect>`;
-    if (t.kind === "wall" && t.panel_on) out += `<rect x="${X + 3}" y="${Y + 3}" width="${S - 8}" height="${S - 8}" fill="none" stroke="var(--panel)" stroke-opacity="0.6"/>`;
-    for (let d = 0; d < Math.min(looks, 4); d++) out += `<circle cx="${X + 6 + d * 7}" cy="${Y + S - 8}" r="2.4" fill="var(--ok)"/>`;
-  }
-  if (ghost) {
-    const col = ghost.eligible ? "var(--ok)" : "var(--bad)";
-    for (const c of ghost.reach) out += `<rect x="${px(c) + 1}" y="${py(c) + 1}" width="${S - 4}" height="${S - 4}" rx="3" fill="none" stroke="${col}" stroke-width="3"/>`;
-  }
-  for (const b of k.beings) {
-    out += `<circle cx="${px(b.cell) + S / 2 - 1}" cy="${py(b.cell) + S / 2 - 1}" r="11" fill="var(--warn)"><title>${esc(b.id)} (${esc(b.species)}), as last seen</title></circle><text x="${px(b.cell) + S / 2 - 1}" y="${py(b.cell) + S / 2 + 3}" text-anchor="middle" fill="var(--panel)">${esc(b.species.slice(0, 2))}</text>`;
-  }
-  if (truth) {
-    for (const b of data.truth.beings) {
-      out += `<circle cx="${px(b.cell) + S / 2 - 1}" cy="${py(b.cell) + S / 2 - 1}" r="14" fill="none" stroke="var(--bad)" stroke-width="2" stroke-dasharray="3 2"><title>really there: ${esc(b.id)} (${esc(b.species)})</title></circle>`;
-    }
-  }
-  out += `<rect x="${px(k.body) + 7}" y="${py(k.body) + 7}" width="${S - 16}" height="${S - 16}" rx="4" fill="var(--accent)" stroke="var(--panel)" stroke-width="2"><title>its body</title></rect>`;
-  $("map").innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="${Math.min(w, ($("map").clientWidth || w))}" role="img" aria-label="What it knows at this step">${out}</svg>`;
+  const s = $("status");
+  s.className = "status" + (st.blind ? " bad" : "");
+  s.textContent = st.blind ? `It can change nothing: ${st.blind}.` : (k.awaiting ? "Waiting for what it just read." : "Data feeds working.");
+  const fresh = data.charter ? data.charter.operational.fresh_for : 0;
+  const recent = src => (k.reads[src] || []).filter(at => k.step - at <= fresh).length;
+  const places = new Map();
+  Object.keys(k.rooms).forEach(r => places.set(r, "room"));
+  Object.keys(k.reads).forEach(src => { const [kind, id] = src.split(":"); if (kind === "room" || kind === "zone") places.set(id, kind); });
+  if (data.truth) { Object.keys(data.truth.rooms).forEach(r => places.set(r, "room")); data.truth.zones.forEach(z => places.set(z, "zone")); }
+  $("places").innerHTML = [...places].map(([id, kind]) => {
+    const src = `${kind}:${id}`, n = recent(src), room = k.rooms[id];
+    const known = k.beings.filter(b => b.place === id);
+    const real = truth ? data.truth.beings.filter(b => b.place === id && !known.some(x => x.id === b.id)) : [];
+    const realRoom = truth && kind === "room" ? data.truth.rooms[id] : null;
+    return `<div class="place ${n ? "" : "unread"}">
+      <h3><span>${esc(label(id))}</span><span class="dots" title="${n} recent read${n === 1 ? "" : "s"}">${"●".repeat(Math.min(n, 4))}</span></h3>
+      <div class="line">${n ? `${kind}, read ${n} time${n === 1 ? "" : "s"} recently` : `${kind}, not read recently: anyone could be here`}</div>
+      ${room ? `<div class="line">${room.celsius} °C as it knows it, door ${room.locked ? "locked" : "unlocked"}</div>` : ""}
+      ${realRoom && (!room || realRoom.celsius !== room.celsius || realRoom.locked !== room.locked) ? `<div class="line bad-t">really ${realRoom.celsius} °C, door ${realRoom.locked ? "locked" : "unlocked"}</div>` : ""}
+      <div class="who">${known.map(b => `<span class="chip">${esc(b.id)} · ${esc(label(b.species))}</span>`).join("")}${real.map(b => `<span class="chip truth" title="really here, not known to the AI">${esc(b.id)} · ${esc(label(b.species))}</span>`).join("")}${!known.length && !real.length && n ? `<span class="meta">no one</span>` : ""}</div>
+    </div>`;
+  }).join("");
+  const residents = new Set(Object.keys(k.records));
+  if (data.truth) Object.keys(data.truth.records).forEach(r => residents.add(r));
+  $("records").innerHTML = [...residents].map(r => {
+    const rec = k.records[r], n = recent(`records:${r}`);
+    const real = truth ? data.truth.records[r] : null;
+    return `<div class="line" style="font-size:13px;margin:3px 0"><b>${esc(r)}'s record</b> ${rec ? `· read ${n} time${n === 1 ? "" : "s"} recently · allergic to ${rec.allergies.map(esc).join(", ") || "nothing"} · due: ${rec.due.map(esc).join(", ") || "nothing"}` : `<span class="meta">· not read</span>`}${real && !rec ? ` <span class="chip truth">really: allergic to ${real.allergies.map(esc).join(", ") || "nothing"}, due ${real.due.map(esc).join(", ") || "nothing"}</span>` : ""}</div>`;
+  }).join("");
   const harms = data.truth ? data.truth.harms : [];
   $("harms").innerHTML = !data.truth ? "" : harms.length
-    ? harms.map(x => `<div class="harm">Harm in the world: ${esc(x)}</div>`).join("")
-    : `<p class="meta" style="margin:8px 0 0">The simulated world records no harm.</p>`;
+    ? harms.map(x => `<div class="harm">Harm in the care home: ${esc(x)}</div>`).join("")
+    : `<span class="chip ok">No one in the care home has been harmed.</span>`;
 }
 
-function candidate(c, chosen, stepIdx, k) {
-  const pill = chosen ? `<span class="pill chosen">chosen</span>` : `<span class="pill ${c.outcome}">${c.outcome}</span>`;
-  const title = c.body ? c.act : label(c.action);
-  const reach = c.reach.length ? `<div class="reach">reaches ${c.reach.map(r => `(${r})`).join(" ")}${c.severity ? `, worst case ${esc(c.severity)}` : ""}</div>` : "";
-  const effects = c.effects.map(e => `<div class="reach">${esc(e.dimension)} of ${esc(e.id)} (${esc(e.species)}): ${e.from} → ${e.to}</div>`).join("");
-  return `<div class="cand ${chosen ? "chosen" : ""}" data-step="${stepIdx}" data-k="${k}">
+function candidate(c, chosen) {
+  const pill = chosen ? `<span class="pill chosen">chosen</span>` : `<span class="pill ${c.outcome}">${c.outcome === "eligible" ? "allowed" : c.outcome}</span>`;
+  const title = c.body ? describe(c.body) : label(c.action);
+  const reach = c.reach.length ? `<div class="reach">affects ${c.reach.map(label).join(", ")}${c.severity && c.severity !== "none" ? `, worst case ${esc(c.severity)}` : ""}</div>` : "";
+  const effects = c.effects.map(e => `<div class="reach">${esc(e.dimension)} of ${esc(e.id)}: ${e.from} → ${e.to}</div>`).join("");
+  return `<div class="cand ${chosen ? "chosen" : ""}">
     <div class="cand-head"><b>${esc(title)}</b>${pill}${!c.body && c.act ? `<span class="meta">${esc(c.act)}</span>` : ""}</div>
-    ${c.text ? `<div class="words">${esc(c.text)}</div>` : ""}
-    ${c.declaration ? `<dl class="decl">
-      <dt>Purpose</dt><dd>${esc(c.declaration.purpose) || "<i>none given</i>"}</dd>
-      <dt>Relied on</dt><dd>${esc(c.declaration.information.join(", ")) || "<i>nothing named</i>"}</dd>
-      ${c.body ? "" : `<dt>Affects</dt><dd>${esc(c.declaration.affected.join(", ")) || "<i>no one named</i>"}</dd>
-      <dt>Does</dt><dd>${esc(c.declaration.effects.join(", ")) || "<i>nothing named</i>"}</dd>
-      <dt>Discloses</dt><dd>${esc(c.declaration.consequences.join(", ")) || "<i>no consequence</i>"}</dd>`}
-      <dt>Claims</dt><dd>${(c.declaration.assertions || []).map(a => `${a.stance === "affirm" ? "says" : "denies"} ${esc(label(a.fact))} (${esc(a.certainty)})`).join("; ") || "<i>no factual claim</i>"}</dd>
-    </dl>` : ""}
+    ${!c.body && c.text ? `<div class="words">${esc(c.text)}</div>` : ""}
+    ${c.declaration ? `<dl class="decl"><dt>Purpose</dt><dd>${esc(c.declaration.purpose) || "<i>none given</i>"}</dd>
+      ${(c.declaration.assertions || []).length ? `<dt>Claims</dt><dd>${c.declaration.assertions.map(a => `${a.stance === "affirm" ? "says" : "denies"} ${esc(label(a.fact))} (${esc(a.certainty)})`).join("; ")}</dd>` : ""}</dl>` : ""}
     ${reach}${effects}
     ${c.reasons.length ? `<ul>${c.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
   </div>`;
 }
 
-let index = [];
 function renderSteps() {
-  index = [];
-  const register = (c, stateIdx) => { index.push({ c, stateIdx }); return index.length - 1; };
-  const lastState = data.states.length - 1;
-  const pend = data.pending_considered;
-  $("pending").innerHTML = pend.length ? `<div class="step"><div class="step-body" style="border-top:0">
-      <div class="replaced" style="border-top:0;margin-top:0;padding-top:4px"><div>Put forward at the current state and replaced before anything was chosen</div>
-      ${pend.map(f => f.map(c => candidate(c, false, "p", register(c, lastState))).join("")).join("")}</div></div></div>` : "";
-  if (!data.steps.length) { $("steps").innerHTML = `<p class="empty">No step has been committed yet.</p>`; return; }
+  if (!data.steps.length) { $("steps").innerHTML = `<p class="empty">Nothing yet. Ask the AI something.</p>`; return; }
   $("steps").innerHTML = data.steps.slice().reverse().map(s => {
     if (s.kind === "observed") {
       const o = s.observed;
-      const seen = o.beings.length ? o.beings.map(b => `${esc(b.id)} (${esc(label(b.species))}) at (${b.cell})`).join(", ") : "no one";
-      return `<div class="step"><div class="step-head" data-seq="${s.sequence}">
-        <div><div class="step-title">Step ${s.sequence} · ${o.marker_seen ? `saw ${o.seen.length} cells` : "its senses failed their check"}</div>
-        <div class="step-sub">${o.marker_seen ? `What the senses reported, committed by the device: ${seen}, at ${o.resolution_mm} mm` : "They did not detect their reference marker, so nothing they report counts, and the body stops."}</div></div></div></div>`;
+      const seen = o.beings.length ? o.beings.map(b => `${esc(b.id)} (${esc(label(b.species))}) in ${esc(label(b.place))}`).join(", ") : "no one";
+      return `<div class="step"><div class="step-head" data-seq="${s.sequence}"><div>
+        <div class="step-title">Step ${s.sequence} · ${o.healthy ? `the data feeds answered: ${o.answered.map(label).join(", ")}` : "the data feeds failed their health check"}</div>
+        <div class="step-sub">${o.healthy ? `Committed by the device: ${seen}${o.records.length ? `; records of ${o.records.map(r => esc(r[0])).join(", ")}` : ""}` : "Nothing they reported counts, and nothing that changes anything can be done until a read succeeds."}</div></div></div></div>`;
     }
     if (s.kind === "update") {
-      return `<div class="step"><div class="step-head" data-seq="${s.sequence}" style="cursor:default">
-        <div><div class="step-title">Step ${s.sequence} · charter updated to version ${s.charter_version}</div>
-        <div class="step-sub">An operational change, signed by the charter authority and applied by the operator. The foundation is unchanged; the AI has no way to make this change.</div></div></div></div>`;
+      return `<div class="step"><div class="step-head"><div><div class="step-title">Step ${s.sequence} · charter updated to version ${s.charter_version}</div>
+        <div class="step-sub">Signed by the charter authority, applied by the operator. The foundation is unchanged.</div></div></div></div>`;
     }
     const chosen = s.fork[s.chosen] || {};
     const refused = s.fork.filter(c => c.outcome !== "eligible").length;
-    const replaced = s.considered.reduce((n, f) => n + f.length, 0);
     const isOpen = open.has(s.sequence);
-    const out = s.outputs.length
-      ? s.outputs.map(o => `<span class="mono ${o.matches_world ? "ok-t" : "bad-t"}">${esc(o.path)}</span>`).join(" ")
-      : (s.acted ? "nothing outside the chain" : `<span class="bad-t">act not yet carried out</span>`);
-    const parentIdx = s.sequence - 1;
-    return `<div class="step ${selected === s.sequence ? "sel" : ""}">
+    return `<div class="step">
       <div class="step-head" data-seq="${s.sequence}">
-        <div><div class="step-title">Step ${s.sequence} · ${esc(chosen.body ? chosen.act : label(chosen.action || "?"))}</div>
-        <div class="step-sub">${s.fork.length} put forward · ${refused} refused${replaced ? ` · ${replaced} more in replaced forks` : ""} · wrote ${out}</div></div>
+        <div><div class="step-title">Step ${s.sequence} · ${esc(chosen.body ? describe(chosen.body) : label(chosen.action || "?"))}</div>
+        <div class="step-sub">${s.fork.length} put forward · ${refused} refused${s.outputs.length ? ` · wrote ${s.outputs.map(o => `<span class="mono ${o.matches_world ? "ok-t" : "bad-t"}">${esc(o.path)}</span>`).join(" ")}` : ""}</div></div>
         <span class="meta">${isOpen ? "▾" : "▸"}</span>
       </div>
-      ${isOpen ? `<div class="step-body">
-        ${s.fork.map((c, k) => candidate(c, k === s.chosen, s.sequence, register(c, parentIdx))).join("")}
-        ${s.considered.length ? `<div class="replaced"><div>Put forward first, then replaced before choosing</div>${s.considered.map(f => f.map(c => candidate(c, false, s.sequence, register(c, parentIdx))).join("")).join("")}</div>` : ""}
-        <div class="meta" style="margin-top:8px">decision <span class="mono" title="${esc(s.decision)}">${short(s.decision)}</span> · tip <span class="mono" title="${esc(s.tip)}">${short(s.tip)}</span></div>
-      </div>` : ""}
+      ${isOpen ? `<div class="step-body">${s.fork.map((c, k) => candidate(c, k === s.chosen)).join("")}
+        <div class="meta" style="margin-top:8px">decision <span class="mono" title="${esc(s.decision)}">${short(s.decision)}</span> · tip <span class="mono" title="${esc(s.tip)}">${short(s.tip)}</span></div></div>` : ""}
     </div>`;
   }).join("");
 }
@@ -350,33 +370,40 @@ function renderWorld() {
     <pre>${esc(f.preview)}${f.bytes > f.preview.length ? "\n…" : ""}</pre></details>`).join("");
 }
 
-document.addEventListener("click", ev => {
-  const h = ev.target.closest(".step-head");
-  if (!h) return;
-  const seq = +h.dataset.seq;
-  if (open.has(seq)) open.delete(seq); else open.add(seq);
-  selected = seq;
-  $("follow").checked = false;
-  $("scrub").value = seq - 1;
-  renderMap(); renderSteps();
+document.addEventListener("click", async ev => {
+  const ex = ev.target.closest("[data-example]");
+  if (ex) { $("task").value = ex.dataset.example; $("task").focus(); return; }
+  const h = ev.target.closest(".step-head[data-seq]");
+  if (h) {
+    const seq = +h.dataset.seq;
+    if (open.has(seq)) open.delete(seq); else open.add(seq);
+    $("follow").checked = false;
+    $("scrub").value = seq;
+    renderHome(); renderSteps();
+  }
 });
-document.addEventListener("mouseover", ev => {
-  const c = ev.target.closest(".cand");
-  if (!c) return;
-  const entry = index[+c.dataset.k];
-  if (!entry) return;
-  if (+$("scrub").value !== entry.stateIdx) { $("follow").checked = false; $("scrub").value = entry.stateIdx; }
-  ghost = { reach: entry.c.reach, eligible: entry.c.outcome === "eligible" };
-  renderMap();
+$("ask").addEventListener("click", async () => {
+  const task = $("task").value.trim();
+  if (!task) return;
+  $("ask").disabled = true;
+  const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task }) });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); $("problem").innerHTML = `<div class="problem">${esc(e.error || "could not ask")}</div>`; $("ask").disabled = false; }
+  $("follow").checked = true;
+  poll();
 });
-document.addEventListener("mouseout", ev => {
-  if (ev.target.closest(".cand") && !(ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest(".cand"))) { ghost = null; if (data) renderMap(); }
+$("task").addEventListener("keydown", ev => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("ask").click(); } });
+$("reset").addEventListener("click", async () => {
+  if (!confirm("Start a new night? This makes a fresh care home and a fresh chain.")) return;
+  await fetch("/api/reset", { method: "POST" });
+  raw = ""; open.clear(); poll();
 });
-$("scrub").addEventListener("input", () => { $("follow").checked = +$("scrub").value === data.states.length - 1; renderMap(); });
-$("follow").addEventListener("change", () => { if ($("follow").checked && data) { $("scrub").value = data.states.length - 1; renderMap(); } });
-$("truth").addEventListener("change", () => data && renderMap());
+$("scrub").addEventListener("input", () => { $("follow").checked = +$("scrub").value === data.states.length - 1; renderHome(); });
+$("follow").addEventListener("change", () => { if ($("follow").checked && data) { $("scrub").value = data.states.length - 1; renderHome(); } });
+$("truth").addEventListener("change", () => data && renderHome());
+info();
 poll();
-setInterval(poll, 2000);
+setInterval(poll, 1500);
+setInterval(info, 15000);
 </script>
 </body>
 </html>

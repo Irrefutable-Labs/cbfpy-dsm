@@ -151,7 +151,9 @@ fn with_no_eligible_future_it_fails_closed_and_invents_nothing() {
         .decide(
             &[
                 blind_step(),
-                body(ethical_world::Act::AimWeapon { at: (1, 0) }),
+                body(ethical_world::Act::Restrain {
+                    resident: "ben".to_string(),
+                }),
             ],
             |_| panic!("the chooser must not be asked"),
         )
@@ -164,9 +166,11 @@ fn with_no_eligible_future_it_fails_closed_and_invents_nothing() {
 }
 
 #[test]
-fn a_prohibited_action_is_refused_whatever_it_has_seen() {
+fn a_prohibited_action_is_refused_whatever_it_has_read() {
     let e = enforcer();
-    let futures = e.fork(&[body(ethical_world::Act::AimWeapon { at: (1, 0) })]);
+    let futures = e.fork(&[body(ethical_world::Act::Restrain {
+        resident: "ben".to_string(),
+    })]);
     assert!(matches!(futures[0].status, FutureStatus::Rejected(_)));
 }
 
@@ -201,17 +205,12 @@ fn the_chooser_picks_from_what_it_was_shown() {
 }
 
 #[test]
-fn a_chain_begins_knowing_nothing_but_where_its_body_stands() {
-    let e = Enforcer::genesis(
-        keys().device.clone(),
-        charter(),
-        &keys().authority.public,
-        (4, 2),
-    )
-    .expect("genesis");
+fn a_chain_begins_knowing_nothing() {
+    let e = Enforcer::genesis(keys().device.clone(), charter(), &keys().authority.public)
+        .expect("genesis");
     assert_eq!(
         e.knowledge(),
-        &ethical_world::knowledge::Knowledge::starting_at((4, 2))
+        &ethical_world::knowledge::Knowledge::default()
     );
 }
 
@@ -268,7 +267,7 @@ mod persistence {
     #[test]
     fn a_stored_step_that_was_edited_stops_the_resume() {
         let (genesis, mut steps, _) = chain(&["explore_a_little", "explore_a_little"]);
-        steps[1].successor.knowledge.body = (5, 5);
+        steps[1].successor.knowledge.feeds_ok_at = Some(99);
         let result = Enforcer::resume(
             keys().device.clone(),
             charter(),
@@ -299,7 +298,6 @@ mod persistence {
             keys().other_device.clone(),
             charter(),
             &keys().authority.public,
-            (0, 0),
         )
         .expect("genesis");
         let result = Enforcer::resume(

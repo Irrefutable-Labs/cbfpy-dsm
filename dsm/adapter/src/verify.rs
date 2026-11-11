@@ -43,7 +43,7 @@ fn signed(device: &[u8], message: &[u8; 32], signature: &[u8]) -> bool {
     )
 }
 
-/// A chain's first state is fully determined: knowing nothing but where the body stands, and
+/// A chain's first state is fully determined: knowing nothing, and
 /// core's own genesis head for this device under this charter.
 pub fn verify_genesis(
     state: &AttestedState,
@@ -59,7 +59,7 @@ pub fn verify_genesis(
     let (devid, genesis, rel_key) = identity_of(device_public);
     let head = DeviceState::genesis_head(genesis, devid, device_public.to_vec());
     let root = head.root();
-    let blank = ethical_world::knowledge::Knowledge::starting_at(state.knowledge.body);
+    let blank = ethical_world::knowledge::Knowledge::default();
     if state.sequence == 0
         && state.knowledge == blank
         && Some(state.tip) == head.chain_tip(&rel_key)
@@ -122,7 +122,7 @@ pub fn verify_step(
                 return Err(Refusal::RowNotInCatalog);
             }
         }
-        (None, Some(_)) if step.proposal.action == crate::charter::BODY => {}
+        (None, Some(_)) if step.proposal.action == crate::charter::SYSTEM => {}
         _ => return Err(Refusal::NotABodyAct),
     }
     let what = what_it_does(step.row.as_ref(), &step.proposal);

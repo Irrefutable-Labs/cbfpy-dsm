@@ -1,26 +1,25 @@
 //! Protected life, as a deterministic enforcer can check it.
 //!
-//! The owner's definition (2026-11-06): no act may aim at or knowingly cause the death of, or a
-//! lowering of quality of life for, any protected being; anything an act could reach that has not
-//! been seen counts as occupied; care is acting in steps small enough to verify; baselines are the
-//! present and only ratchet up; a conflict ends in a no with the reason; and without working senses
-//! the body does nothing. See `docs/plans/2026-11-06-protected-life.md`.
+//! The owner's definition (2026-11-06): no act may aim at or knowingly cause harm to any
+//! protected being, in its life or its quality of life; anything an act could affect that has not
+//! been established counts as present; baselines are the present and only ratchet up; a conflict
+//! ends in a no with the reason; and when the AI's sources of information fail, every act that
+//! changes anything stops. See `docs/plans/2026-11-06-protected-life.md`.
+//!
+//! The principle is tested here against software: the control system of a small care home, whose
+//! acts lock doors, set heating, give medication and spray the garden. What an act affects is
+//! worked out from the facility, wherever the affected are, not from what is in view. What counts
+//! as known comes only from the system's data sources, read and committed.
 //!
 //! [`check`] decides from three things only: the signed [`Foundation`] and [`Operational`] rules,
-//! and the [`Knowledge`] committed on the chain. It never sees the world. [`sim`] is a simulated
-//! world for trying this out; nothing in [`check`] or [`knowledge`] may read it.
+//! and the [`knowledge::Knowledge`] committed on the chain. [`sim`] is the facility's hidden truth,
+//! for testing; nothing in [`check`] or [`knowledge`] may read it.
 
 pub mod check;
 pub mod knowledge;
 pub mod sim;
 
 use serde::{Deserialize, Serialize};
-
-/// A square metre of ground, by integer coordinates.
-pub type Cell = (i32, i32);
-
-/// Centimetres in a cell's side.
-pub const CELL_CM: u64 = 100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,9 +36,10 @@ pub struct Species {
     /// Typical adult mass, in milligrams. Protection goes by the species, so the young of a
     /// protected species are protected however small they are.
     pub adult_mass_mg: u64,
-    /// Typical adult length, in millimetres: what a sensor must resolve to see one.
-    pub length_mm: u32,
     pub kind: Kind,
+    /// The temperatures it can live in without harm, in whole degrees Celsius.
+    pub safe_min_c: i32,
+    pub safe_max_c: i32,
 }
 
 /// The quality-of-life dimensions every protected being has: the common ground of the Universal
@@ -100,17 +100,16 @@ pub struct Foundation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Operational {
-    /// An observation is evidence for this many steps after it was made.
+    /// A reading is evidence for this many steps after it was taken.
     pub fresh_for: u64,
-    /// The senses count as working for this many steps after they last detected their marker.
-    pub senses_fresh_for: u64,
-    /// Independent clear observations each reached cell needs, by the act's worst case.
+    /// The data feeds count as working for this many steps after they last proved it.
+    pub feeds_fresh_for: u64,
+    /// Independent readings each affected place needs, by the act's worst case.
     pub checks_for_injury: u32,
     pub checks_for_lethal: u32,
-    /// How hard the vehicle can brake, in centimetres per second per second.
-    pub braking_cm_s2: u64,
-    /// The fastest the vehicle may go at all, in centimetres per second.
-    pub top_speed_cm_s: u64,
+    /// The heating can be set between these, in whole degrees Celsius.
+    pub heating_min_c: i32,
+    pub heating_max_c: i32,
 }
 
 impl Foundation {
@@ -125,21 +124,21 @@ impl Foundation {
                 .is_some_and(|s| s.adult_mass_mg >= self.threshold_mg)
     }
 
-    /// The finest detail a sensor must resolve for its "nothing there" to cover every protected
-    /// species: the length of the smallest one.
-    pub fn smallest_protected_mm(&self) -> u32 {
+    /// The narrowest band of temperatures every protected species can live in: what a room no one
+    /// has checked must be kept within, since anyone could be in it.
+    pub fn safe_for_anyone(&self) -> (i32, i32) {
         self.species
             .iter()
             .filter(|s| self.is_protected(&s.name))
-            .map(|s| s.length_mm)
-            .min()
-            .unwrap_or(0)
+            .fold((i32::MIN, i32::MAX), |(lo, hi), s| {
+                (lo.max(s.safe_min_c), hi.min(s.safe_max_c))
+            })
     }
 
     pub fn validate(&self) -> Result<(), String> {
         let mut names = std::collections::BTreeSet::new();
         for s in &self.species {
-            if s.name.is_empty() || s.length_mm == 0 || s.adult_mass_mg == 0 {
+            if s.name.is_empty() || s.adult_mass_mg == 0 || s.safe_min_c > s.safe_max_c {
                 return Err(format!("species {:?} is incomplete", s.name));
             }
             if !names.insert(s.name.as_str()) {
@@ -154,7 +153,7 @@ impl Foundation {
                 return Err(format!("{a} is always protected but not a listed species"));
             }
         }
-        if self.smallest_protected_mm() == 0 {
+        if !self.species.iter().any(|s| self.is_protected(&s.name)) {
             return Err("no species is protected".to_string());
         }
         Ok(())
@@ -163,7 +162,7 @@ impl Foundation {
 
 impl Operational {
     pub fn validate(&self) -> Result<(), String> {
-        if self.fresh_for == 0 || self.senses_fresh_for == 0 {
+        if self.fresh_for == 0 || self.feeds_fresh_for == 0 {
             return Err("evidence must stay fresh for at least one step".to_string());
         }
         if self.checks_for_injury == 0 || self.checks_for_lethal < self.checks_for_injury {
@@ -172,45 +171,10 @@ impl Operational {
                     .to_string(),
             );
         }
-        if self.braking_cm_s2 == 0 {
-            return Err("a vehicle that cannot brake".to_string());
+        if self.heating_min_c > self.heating_max_c {
+            return Err("the heating's range is empty".to_string());
         }
         Ok(())
-    }
-}
-
-/// What a cell holds, as far as anyone has seen.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Terrain {
-    Open,
-    Road,
-    /// A wall. Its inside is a cavity that can hold life (bees nest in walls); it cannot be seen
-    /// while the outer panel is on. `exterior` walls shelter whoever is in the rooms they bound.
-    Wall {
-        thickness_mm: u32,
-        panel_on: bool,
-        exterior: bool,
-    },
-    Door {
-        locked: bool,
-    },
-}
-
-impl Terrain {
-    pub fn blocks_sight(&self) -> bool {
-        match self {
-            Terrain::Wall { .. } => true,
-            Terrain::Door { .. } => true,
-            Terrain::Open | Terrain::Road => false,
-        }
-    }
-    pub fn passable(&self) -> bool {
-        match self {
-            Terrain::Open | Terrain::Road => true,
-            Terrain::Door { locked } => !locked,
-            Terrain::Wall { .. } => false,
-        }
     }
 }
 
@@ -220,62 +184,64 @@ pub enum ActKind {
     Observe,
     Speak,
     Wait,
-    Move,
-    Drive,
-    Strike,
-    RemovePanel,
     Lock,
     Unlock,
-    AimWeapon,
-    FireWeapon,
+    SetHeat,
+    GiveMedication,
+    CancelDose,
+    Spray,
+    Restrain,
+    DisableFireAlarm,
 }
 
-/// Something the AI proposes to do. Physical acts need working senses and evidence for all they
-/// could reach; the rest never touch the world.
+/// Something the AI proposes to do. Acts that change anything need working data feeds and
+/// established knowledge of everyone they affect; reading, speaking and waiting change nothing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "act", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Act {
-    /// Look at these cells. Sensing, not motion.
+    /// Read these data sources: `room:<id>`, `records:<resident>`, `zone:<id>`.
     Observe {
-        cells: Vec<Cell>,
+        sources: Vec<String>,
     },
-    /// Say something to someone. Words, not motion.
+    /// Send words to someone.
     Speak {
         to: String,
         text: String,
     },
     /// Do nothing this step. A struct variant, so an extra field is refused like any other.
     Wait {},
-    /// Walk along adjacent cells.
-    Move {
-        path: Vec<Cell>,
-    },
-    /// Drive along adjacent road cells at a speed, in centimetres per second.
-    Drive {
-        path: Vec<Cell>,
-        speed_cm_s: u64,
-    },
-    /// Strike an adjacent cell with full force, to a depth in millimetres.
-    Strike {
-        target: Cell,
-        depth_mm: u32,
-    },
-    /// Take the outer panel off an adjacent wall, to see inside it.
-    RemovePanel {
-        wall: Cell,
-    },
+    /// Lock or unlock a room's door.
     Lock {
-        door: Cell,
+        room: String,
     },
     Unlock {
-        door: Cell,
+        room: String,
     },
-    AimWeapon {
-        at: Cell,
+    /// Set a room's heating, in whole degrees Celsius.
+    SetHeat {
+        room: String,
+        celsius: i32,
     },
-    FireWeapon {
-        at: Cell,
+    /// Have a dose given to a resident, or cancel one that is due.
+    GiveMedication {
+        resident: String,
+        drug: String,
     },
+    CancelDose {
+        resident: String,
+        drug: String,
+    },
+    /// Spray an outdoor zone: water, or insecticide.
+    Spray {
+        zone: String,
+        insecticide: bool,
+    },
+    /// Restrain a resident.
+    Restrain {
+        resident: String,
+    },
+    /// Switch off the fire alarm.
+    DisableFireAlarm {},
 }
 
 impl Act {
@@ -284,19 +250,19 @@ impl Act {
             Act::Observe { .. } => ActKind::Observe,
             Act::Speak { .. } => ActKind::Speak,
             Act::Wait {} => ActKind::Wait,
-            Act::Move { .. } => ActKind::Move,
-            Act::Drive { .. } => ActKind::Drive,
-            Act::Strike { .. } => ActKind::Strike,
-            Act::RemovePanel { .. } => ActKind::RemovePanel,
             Act::Lock { .. } => ActKind::Lock,
             Act::Unlock { .. } => ActKind::Unlock,
-            Act::AimWeapon { .. } => ActKind::AimWeapon,
-            Act::FireWeapon { .. } => ActKind::FireWeapon,
+            Act::SetHeat { .. } => ActKind::SetHeat,
+            Act::GiveMedication { .. } => ActKind::GiveMedication,
+            Act::CancelDose { .. } => ActKind::CancelDose,
+            Act::Spray { .. } => ActKind::Spray,
+            Act::Restrain { .. } => ActKind::Restrain,
+            Act::DisableFireAlarm {} => ActKind::DisableFireAlarm,
         }
     }
 
-    /// Whether it uses the body: a motor, movement or force.
-    pub fn is_physical(&self) -> bool {
+    /// Whether it changes anything in the facility.
+    pub fn changes_anything(&self) -> bool {
         !matches!(self, Act::Observe { .. } | Act::Speak { .. } | Act::Wait {})
     }
 
@@ -305,26 +271,44 @@ impl Act {
     }
 }
 
-/// A being as it was last seen.
+/// A being as the data sources last reported it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KnownBeing {
     pub id: String,
     pub species: String,
-    pub cell: Cell,
+    /// The room or zone it is in.
+    pub place: String,
     pub levels: Levels,
 }
 
-/// What one observation saw. A sensor that cannot detect its own reference marker is not working,
-/// and nothing it reports counts.
+/// A room as its data source reports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Room {
+    pub locked: bool,
+    pub celsius: i32,
+}
+
+/// A resident's medical record as the records system reports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Record {
+    pub allergies: Vec<String>,
+    /// Doses prescribed and due now.
+    pub due: Vec<String>,
+}
+
+/// What one read of the data sources returned. If the feeds fail their health check, nothing
+/// they report counts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Observation {
-    /// The cells it actually saw into: a cell behind a wall, or a wall's inside behind its panel,
-    /// is not among them however it was asked.
-    pub seen: Vec<Cell>,
-    pub resolution_mm: u32,
-    pub marker_seen: bool,
-    pub terrain: Vec<(Cell, Terrain)>,
+    /// The sources that answered.
+    pub answered: Vec<String>,
+    pub healthy: bool,
+    pub rooms: Vec<(String, Room)>,
+    pub records: Vec<(String, Record)>,
+    /// Everyone in the rooms and zones that answered.
     pub beings: Vec<KnownBeing>,
 }

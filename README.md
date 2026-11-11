@@ -1,12 +1,14 @@
 # CBFpy for DSM
 
-**This fork, by Irrefutable Labs, adds a DSM ethical autonomy prototype.** An AI with a body proposes what to do next, and deterministic rules decide which may become a real step on a [Deterministic State Machine](https://github.com/deterministicstatemachine/dsm) chain: it may not harm or endanger any animal bigger than a baby mouse, or any honeybee; anything it has not seen counts as occupied; it may not leave anyone worse off than they are now; and without working senses its body does nothing. CBFpy checks the van's braking limit independently as a control barrier function.
+**This fork, by Irrefutable Labs, adds a DSM ethical autonomy prototype.** A local AI runs a small care home's control system on the night shift, and deterministic rules decide which of the acts it proposes may become a real step on a [Deterministic State Machine](https://github.com/deterministicstatemachine/dsm) chain: it may not harm or endanger any animal bigger than a baby mouse, or any honeybee, wherever they are; anything it has not established counts as possibly affecting anyone; it may not leave anyone worse off than they are now; and when its data feeds fail, it changes nothing. No AI judges anything. CBFpy checks the heating limit independently as a control barrier function.
 
-- [`dsm/`](dsm/README.md): the checks, the DSM adapter, the simulated world and scenarios, the Lean proofs and the report.
-- [`cbfpy/ethics/`](cbfpy/ethics/braking.py): the braking limit as a CBFpy problem.
+**Try it:** with [Ollama](https://ollama.com) and `ollama pull deepseek-r1:8b`, run `cargo build --release && ./target/release/ethical-app` in [`dsm/`](dsm/README.md#try-it) and open http://127.0.0.1:8780/.
+
+- [`dsm/`](dsm/README.md): the app, the checks, the DSM adapter, the simulated care home and scenarios, the Lean proofs and the report.
+- [`cbfpy/ethics/`](cbfpy/ethics/heating.py): the heating limit as a CBFpy problem.
 - [`test/test_ethics_crosscheck.py`](test/test_ethics_crosscheck.py): the cross-check.
 
-It enforces the rules and facts it is given, in a simulated world. It does not understand ethics: see [the report](dsm/REPORT.md).
+It enforces the rules and facts it is given, against a simulated care home. It does not understand ethics: see [the report](dsm/REPORT.md).
 
 The original CBFpy README follows.
 

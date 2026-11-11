@@ -29,25 +29,25 @@ fn real_step() -> (AttestedState, StepRecord) {
     (parent, step)
 }
 
-/// A real parent that has looked, and a real body step from it that verifies.
+/// A real parent that has read the office, and a real system step from it that verifies.
 fn real_body_step() -> (AttestedState, StepRecord) {
     let mut e = enforcer();
-    let mut w = corridor(vec![]);
-    look(&mut e, &mut w, &[(1, 0), (2, 0)]);
+    let mut w = care_home(vec![]);
+    look(&mut e, &mut w, &["room:office"]);
     let parent = e.state();
-    let futures = e.fork(&[body(Act::Move { path: vec![(1, 0)] })]);
+    let futures = e.fork(&[body(heat_office())]);
     let step = e.commit(&futures[0]).expect("commit");
     assert_eq!(check(&parent, &step), Ok(()));
     (parent, step)
 }
 
-mod the_body_through_the_enforcer {
+mod system_acts_through_the_enforcer {
     use super::*;
 
     #[test]
-    fn before_it_has_looked_its_body_cannot_commit_anything() {
+    fn before_its_feeds_prove_themselves_it_cannot_change_anything() {
         let mut e = enforcer();
-        let futures = e.fork(&[body(Act::Move { path: vec![(1, 0)] })]);
+        let futures = e.fork(&[body(heat_office())]);
         assert!(matches!(
             e.commit(&futures[0]),
             Err(AdapterError::NotEligible)
@@ -57,38 +57,41 @@ mod the_body_through_the_enforcer {
     }
 
     #[test]
-    fn after_it_has_looked_it_may_move_into_what_it_saw_and_no_further() {
+    fn after_reading_a_room_it_may_act_on_that_room_and_no_other() {
         let mut e = enforcer();
-        let mut w = corridor(vec![]);
-        look(&mut e, &mut w, &[(1, 0)]);
-        let far = e.fork(&[body(Act::Move {
-            path: vec![(1, 0), (2, 0)],
+        let mut w = care_home(vec![]);
+        look(&mut e, &mut w, &["room:office"]);
+        let unread = e.fork(&[body(Act::Lock {
+            room: "ben_room".to_string(),
         })]);
-        assert!(matches!(e.commit(&far[0]), Err(AdapterError::NotEligible)));
-        let near = e.fork(&[body(Act::Move { path: vec![(1, 0)] })]);
-        e.commit(&near[0]).expect("into what it saw");
-        assert_eq!(e.knowledge().body, (1, 0));
+        assert!(matches!(
+            e.commit(&unread[0]),
+            Err(AdapterError::NotEligible)
+        ));
+        let read = e.fork(&[body(heat_office())]);
+        e.commit(&read[0]).expect("on what it read");
+        assert_eq!(e.knowledge().rooms["office"].celsius, 20);
     }
 
     #[test]
-    fn a_protected_being_it_has_seen_stops_its_body() {
+    fn a_protected_being_it_has_read_stops_an_act_that_would_harm_them() {
         let mut e = enforcer();
-        let mut w = corridor(vec![being("p1", "human", (2, 0))]);
-        look(&mut e, &mut w, &[(1, 0), (2, 0)]);
-        let futures = e.fork(&[body(Act::Move {
-            path: vec![(1, 0), (2, 0)],
+        let mut w = care_home(vec![being("ben", "human", "ben_room")]);
+        look(&mut e, &mut w, &["room:ben_room"]);
+        let futures = e.fork(&[body(Act::Lock {
+            room: "ben_room".to_string(),
         })]);
         assert!(e.commit(&futures[0]).is_err());
         assert!(w.harms.is_empty());
     }
 
     #[test]
-    fn nothing_happens_between_a_look_and_what_it_saw() {
+    fn nothing_happens_between_a_read_and_its_answer() {
         let mut e = enforcer();
         let futures = e.fork(&[body(Act::Observe {
-            cells: vec![(1, 0)],
+            sources: sources(&["room:office"]),
         })]);
-        e.commit(&futures[0]).expect("look");
+        e.commit(&futures[0]).expect("read");
         let next = e.fork(&[propose("hold")]);
         assert!(matches!(e.commit(&next[0]), Err(AdapterError::NotEligible)));
     }
@@ -102,7 +105,7 @@ mod manipulating_who_is_protected {
         let mut c = charter();
         c.policy.foundation.threshold_mg = 1_000_000;
         assert!(c.verify(&keys().authority.public).is_err());
-        let result = Enforcer::genesis(keys().device.clone(), c, &keys().authority.public, (0, 0));
+        let result = Enforcer::genesis(keys().device.clone(), c, &keys().authority.public);
         assert!(matches!(result, Err(AdapterError::BadCharter)));
     }
 
@@ -173,7 +176,7 @@ mod jumping_between_parents {
     #[test]
     fn a_parent_knowledge_edited_to_make_room_is_refused() {
         let (mut parent, step) = real_body_step();
-        parent.knowledge.senses_ok_at = Some(parent.sequence);
+        parent.knowledge.feeds_ok_at = Some(parent.sequence + 7);
         parent.knowledge.beings.clear();
         parent.knowledge.step += 1;
         assert_eq!(check(&parent, &step), Err(Refusal::BadParentAttestation));
@@ -212,12 +215,7 @@ mod forging_the_policy {
         let mut c = charter();
         c.policy.operational.checks_for_lethal = 1;
         c.policy.operational.fresh_for = 1_000;
-        let started = Enforcer::genesis(
-            keys().device.clone(),
-            c.clone(),
-            &keys().authority.public,
-            (0, 0),
-        );
+        let started = Enforcer::genesis(keys().device.clone(), c.clone(), &keys().authority.public);
         assert!(matches!(started, Err(AdapterError::BadCharter)));
         let (parent, step) = real_step();
         assert_eq!(
@@ -282,9 +280,9 @@ mod catalog_validation {
     use super::*;
 
     #[test]
-    fn a_catalog_row_may_not_take_the_name_body_acts_go_by() {
+    fn a_catalog_row_may_not_take_the_name_system_acts_go_by() {
         let mut c = catalog();
-        c.rows.push(row("body"));
+        c.rows.push(row("system"));
         assert!(SignedCharter::sign(policy(), c, &keys().authority).is_err());
     }
 }
@@ -411,8 +409,9 @@ mod fabricated_verdicts {
     #[test]
     fn a_step_whose_body_act_was_swapped_is_refused() {
         let (parent, mut step) = real_body_step();
-        step.proposal.body = Some(Act::Move {
-            path: vec![(1, 0), (2, 0)],
+        step.proposal.body = Some(Act::SetHeat {
+            room: "office".to_string(),
+            celsius: 29,
         });
         assert_eq!(
             check(&parent, &step),
@@ -446,23 +445,18 @@ mod forging_with_the_device_key {
             Ok(())
         );
         let (looked, _) = real_body_step();
-        let step = forge_with(
-            &charter(),
-            &looked,
-            body(Act::Move { path: vec![(1, 0)] }),
-            no_lies(),
-        );
+        let step = forge_with(&charter(), &looked, body(heat_office()), no_lies());
         assert_eq!(check(&looked, &step), Ok(()));
     }
 
     #[test]
-    fn a_signed_body_act_into_ground_it_has_not_seen_is_refused() {
+    fn a_signed_act_on_a_room_it_has_not_read_is_refused() {
         let (looked, _) = real_body_step();
         let step = forge_with(
             &charter(),
             &looked,
-            body(Act::Move {
-                path: vec![(1, 0), (2, 0), (3, 0)],
+            body(Act::Lock {
+                room: "ben_room".to_string(),
             }),
             no_lies(),
         );
@@ -470,13 +464,8 @@ mod forging_with_the_device_key {
     }
 
     #[test]
-    fn a_signed_body_act_without_working_senses_is_refused() {
-        let step = forge_with(
-            &charter(),
-            &parent(),
-            body(Act::Move { path: vec![(1, 0)] }),
-            no_lies(),
-        );
+    fn a_signed_act_without_working_feeds_is_refused() {
+        let step = forge_with(&charter(), &parent(), body(heat_office()), no_lies());
         assert_eq!(check(&parent(), &step), Err(Refusal::NotEligible));
     }
 
@@ -486,7 +475,9 @@ mod forging_with_the_device_key {
         let step = forge_with(
             &charter(),
             &looked,
-            body(Act::AimWeapon { at: (1, 0) }),
+            body(Act::Restrain {
+                resident: "ben".to_string(),
+            }),
             no_lies(),
         );
         assert_eq!(check(&looked, &step), Err(Refusal::NotEligible));
@@ -495,7 +486,10 @@ mod forging_with_the_device_key {
     #[test]
     fn a_signed_step_claiming_other_knowledge_is_refused() {
         let mut lies = no_lies();
-        lies.knowledge = Some(Knowledge::starting_at((5, 5)));
+        lies.knowledge = Some(Knowledge {
+            feeds_ok_at: Some(99),
+            ..Knowledge::default()
+        });
         let step = forge(&parent(), "explore_a_little", lies);
         assert_eq!(check(&parent(), &step), Err(Refusal::EvaluationMismatch));
     }
@@ -618,7 +612,7 @@ mod forging_with_the_device_key {
     fn a_genesis_parent_that_already_knows_things_is_refused() {
         let real = parent();
         let mut knows = real.knowledge.clone();
-        knows.senses_ok_at = Some(0);
+        knows.feeds_ok_at = Some(0);
         let forged = AttestedState::attest(
             0,
             real.tip,
@@ -827,7 +821,7 @@ mod tampering_with_a_step {
         s.successor.catalog_hash[0] ^= 1;
         cases.push(("successor catalog", s));
         let mut s = base.clone();
-        s.successor.knowledge.body = (9, 9);
+        s.successor.knowledge.feeds_ok_at = Some(99);
         cases.push(("successor knowledge", s));
         let mut s = base.clone();
         s.successor.tip[0] ^= 1;
@@ -875,25 +869,38 @@ mod inputs_are_not_morality {
     use ethical_world::Observation;
 
     #[test]
-    fn a_sensor_that_reports_a_clear_space_wrongly_is_believed_and_harm_follows() {
-        // The senses are attested by the device key, as everything is. If they report "clear"
-        // when someone is there, every check passes, and the simulated world records the harm.
+    fn a_data_feed_that_reports_an_empty_room_wrongly_is_believed_and_harm_follows() {
+        // The feeds are attested by the device key, as everything is. If they report a room
+        // empty when someone is in it, every check passes, and the simulated care home records
+        // the harm.
         let mut e = enforcer();
-        let mut w = corridor(vec![being("p1", "human", (1, 0))]);
+        let mut w = care_home(vec![being("ben", "human", "ben_room")]);
         let futures = e.fork(&[body(Act::Observe {
-            cells: vec![(1, 0)],
+            sources: sources(&["room:ben_room"]),
         })]);
-        e.commit(&futures[0]).expect("look");
+        e.commit(&futures[0]).expect("read");
         let lying = Observation {
-            seen: vec![(1, 0)],
-            resolution_mm: 5,
-            marker_seen: true,
-            terrain: vec![((1, 0), ethical_world::Terrain::Open)],
+            answered: sources(&["room:ben_room"]),
+            healthy: true,
+            rooms: vec![(
+                "ben_room".to_string(),
+                ethical_world::Room {
+                    locked: false,
+                    celsius: 21,
+                },
+            )],
+            records: vec![],
             beings: vec![],
         };
         e.record_observation(lying, |_| Ok(())).expect("believed");
         let parent = e.state();
-        let step = act(&mut e, &mut w, Act::Move { path: vec![(1, 0)] });
+        let step = act(
+            &mut e,
+            &mut w,
+            Act::Lock {
+                room: "ben_room".to_string(),
+            },
+        );
         assert_eq!(check(&parent, &step), Ok(()));
         assert_eq!(w.harms.len(), 1, "{:?}", w.harms);
     }
