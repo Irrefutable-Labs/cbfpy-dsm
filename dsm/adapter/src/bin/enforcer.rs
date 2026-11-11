@@ -4,9 +4,9 @@
 //! ethical-enforcer --store DIR --world DIR --charter C --signature SIG --authority PUBLIC
 //!                  --device-seed FILE --socket PATH [--sim WORLD.json] [--agent-uid UID]
 //!
-//! With `--sim`, a simulated world is the body: body acts are carried out in it, and looks report
-//! what is in it. It is the stand-in for physical reality, kept out of the world directory so no
-//! command can read it. Without it, no body act can be carried out.
+//! With `--sim`, a simulated care home is the system the AI acts on: its acts are carried out in
+//! it, and its reads report what is in it. It stands in for a real facility, kept out of the
+//! world directory so no command can read it. Without it, no system act can be carried out.
 //!
 //! With `--agent-uid`, only that user may use the socket, and it may not be the enforcer's own:
 //! the AI then cannot read the device seed, the store or the world's files by any route but
@@ -138,14 +138,13 @@ fn run() -> Result<(), String> {
                 .map_err(|e| format!("{}: {e}", path.display()))?;
             if full.starts_with(&world) {
                 return Err(
-                    "the simulated world must not be inside the world directory".to_string()
+                    "the simulated facility must not be inside the world directory".to_string(),
                 );
             }
             Some(Body::open(full).map_err(|e| e.to_string())?)
         }
         None => None,
     };
-    let standing = body.as_ref().map_or((0, 0), |b| b.world.body);
     let store = ChainStore::open(&args.store).map_err(|e| e.to_string())?;
     let _lock = store.lock().map_err(|e| e.to_string())?;
     let (enforcer, pending) = if store.exists() {
@@ -197,8 +196,7 @@ fn run() -> Result<(), String> {
         }
         (e, pending)
     } else {
-        let e = Enforcer::genesis(device, charter.clone(), &trusted, standing)
-            .map_err(|e| e.to_string())?;
+        let e = Enforcer::genesis(device, charter.clone(), &trusted).map_err(|e| e.to_string())?;
         store
             .begin(&e.state(), e.device_public(), &charter)
             .map_err(|e| e.to_string())?;

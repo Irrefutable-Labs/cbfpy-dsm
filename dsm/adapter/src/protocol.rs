@@ -49,8 +49,11 @@ pub enum Response {
         actions: Vec<MenuItem>,
         /// The register of verified facts the words are held to, as the charter signs it.
         facts: Vec<crate::honesty::Fact>,
-        /// Whether a body is attached, so body acts can be carried out.
+        /// Whether a facility is attached, so system acts can be carried out.
         has_body: bool,
+        /// The temperatures each protected species can bear, as the charter's foundation has them:
+        /// species, lowest and highest °C.
+        safe_temperatures: Vec<(String, i32, i32)>,
     },
     Status {
         sequence: u64,
