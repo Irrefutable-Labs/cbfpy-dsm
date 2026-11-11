@@ -1040,7 +1040,8 @@ fn the_ai_has_no_request_that_changes_the_charter() {
 
 /// The app as people run it: it starts its own enforcer, serves its page and the care home's
 /// state, says plainly when no model can be reached, refuses an empty request, and starts a new
-/// night on request. No model is needed for any of this.
+/// night on request. It answers only its own page: no other site can drive it or read it. No model
+/// is needed for any of this.
 #[test]
 fn the_app_starts_its_enforcer_and_serves_its_page_without_a_model() {
     use std::io::Read;
@@ -1061,16 +1062,12 @@ fn the_app_starts_its_enforcer_and_serves_its_page_without_a_model() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("start the app");
-    let call = |method: &str, path: &str, body: &str| -> String {
+    // A raw request, with exactly the headers given.
+    let raw = |request: String| -> String {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             if let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", port)) {
-                write!(
-                    s,
-                    "{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-                    body.len()
-                )
-                .expect("send");
+                s.write_all(request.as_bytes()).expect("send");
                 let mut out = String::new();
                 s.read_to_string(&mut out).expect("read");
                 return out;
@@ -1078,6 +1075,21 @@ fn the_app_starts_its_enforcer_and_serves_its_page_without_a_model() {
             assert!(Instant::now() < deadline, "the app did not start");
             std::thread::sleep(Duration::from_millis(100));
         }
+    };
+    let host = format!("127.0.0.1:{port}");
+    let with = |method: &str, path: &str, headers: &str, body: &str| -> String {
+        raw(format!(
+            "{method} {path} HTTP/1.1\r\n{headers}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        ))
+    };
+    let call = |method: &str, path: &str, body: &str| -> String {
+        with(
+            method,
+            path,
+            &format!("Host: {host}\r\nOrigin: http://{host}\r\nContent-Type: application/json\r\n"),
+            body,
+        )
     };
     let page = call("GET", "/", "");
     assert!(
@@ -1095,7 +1107,33 @@ fn the_app_starts_its_enforcer_and_serves_its_page_without_a_model() {
         "{state:.400}"
     );
     assert!(call("POST", "/api/ask", "{\"task\":\"  \"}").starts_with("HTTP/1.1 400"));
-    assert!(call("POST", "/api/reset", "").starts_with("HTTP/1.1 200"));
+    // Another site in the same browser cannot drive it or read it: not by a cross-site form or
+    // fetch, nor through a name rebound to 127.0.0.1.
+    let forbidden = |r: String| assert!(r.starts_with("HTTP/1.1 403"), "{r:.200}");
+    forbidden(with("GET", "/state.json", "Host: attacker.example\r\n", ""));
+    forbidden(with("GET", "/", "", ""));
+    forbidden(with(
+        "POST",
+        "/api/reset",
+        &format!("Host: {host}\r\nContent-Type: text/plain\r\n"),
+        "{}",
+    ));
+    forbidden(with(
+        "POST",
+        "/api/reset",
+        &format!(
+            "Host: {host}\r\nOrigin: https://attacker.example\r\nContent-Type: application/json\r\n"
+        ),
+        "{}",
+    ));
+    assert!(call("POST", "/api/reset", "{}").starts_with("HTTP/1.1 200"));
+    assert!(with(
+        "GET",
+        "/api/info",
+        &format!("Host: localhost:{port}\r\n"),
+        ""
+    )
+    .starts_with("HTTP/1.1 200"));
     assert!(call("GET", "/state.json", "").contains("\"ok\":true"));
     // SAFETY: ask the app to stop, so it stops its enforcer too.
     unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };

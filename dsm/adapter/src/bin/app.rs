@@ -139,6 +139,8 @@ struct Job {
 }
 
 struct App {
+    /// The port it listens on: the only Host it answers, and its page's only Origin.
+    port: u16,
     paths: Paths,
     model: Ollama,
     directory: Vec<String>,
@@ -228,26 +230,74 @@ fn ollama_status(app: &App) -> serde_json::Value {
     }
 }
 
+/// Whether a request comes from the app's own page. Any site open in the same browser can send
+/// requests to 127.0.0.1, so: the Host must be this address, which a name rebound to 127.0.0.1
+/// does not give; and a request that changes anything must be JSON, which a cross-site form cannot
+/// send and a cross-site fetch cannot send without a preflight this server never answers, and must
+/// not come from another origin.
+fn own_request(
+    port: u16,
+    method: &str,
+    host: Option<&str>,
+    origin: Option<&str>,
+    kind: Option<&str>,
+) -> bool {
+    let hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    let ours = |h: &str| hosts.iter().any(|o| o == h);
+    if !host.is_some_and(ours) {
+        return false;
+    }
+    if method == "GET" {
+        return true;
+    }
+    let json = kind.is_some_and(|k| {
+        k.split(';')
+            .next()
+            .is_some_and(|t| t.trim().eq_ignore_ascii_case("application/json"))
+    });
+    let same_origin = origin.is_none_or(|o| o.strip_prefix("http://").is_some_and(ours));
+    json && same_origin
+}
+
 fn serve(app: Arc<App>, mut stream: TcpStream) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     reader.read_line(&mut line)?;
     let mut length = 0usize;
+    let (mut host, mut origin, mut kind) = (None, None, None);
     loop {
         let mut header = String::new();
         reader.read_line(&mut header)?;
         if header.trim().is_empty() {
             break;
         }
-        if let Some(v) = header.to_ascii_lowercase().strip_prefix("content-length:") {
-            length = v.trim().parse().unwrap_or(0).min(1 << 16);
+        let Some((name, value)) = header.split_once(':') else {
+            continue;
+        };
+        let value = value.trim().to_string();
+        match name.trim().to_ascii_lowercase().as_str() {
+            "content-length" => length = value.parse().unwrap_or(0).min(1 << 16),
+            "host" => host = Some(value),
+            "origin" => origin = Some(value),
+            "content-type" => kind = Some(value),
+            _ => {}
         }
     }
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body)?;
+    let method = line.split_whitespace().next().unwrap_or("");
     let path = line.split_whitespace().nth(1).unwrap_or("");
     let json = "application/json";
-    match (line.split_whitespace().next().unwrap_or(""), path) {
+    if !own_request(
+        app.port,
+        method,
+        host.as_deref(),
+        origin.as_deref(),
+        kind.as_deref(),
+    ) {
+        return respond(&mut stream, "403 Forbidden", json, "{}");
+    }
+    match (method, path) {
         ("GET", "/") => respond(&mut stream, "200 OK", "text/html; charset=utf-8", PAGE),
         ("GET", "/state.json") => {
             let device = read_public_key(&app.paths.store().join("device.pub")).unwrap_or_default();
@@ -387,7 +437,10 @@ fn run() -> Result<(), String> {
         libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
     }
+    let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("listen: {e}"))?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let app = Arc::new(App {
+        port,
         paths,
         model: Ollama {
             address: ollama,
@@ -399,7 +452,6 @@ fn run() -> Result<(), String> {
         enforcer: Mutex::new(Some(child)),
         job: Mutex::new(Job::default()),
     });
-    let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("listen: {e}"))?;
     println!("Open http://127.0.0.1:{port}/ in your browser. Ctrl+C to stop.");
     if let Some(problem) = ollama_status(&app)["problem"].as_str() {
         println!("Before asking it anything: {problem}");

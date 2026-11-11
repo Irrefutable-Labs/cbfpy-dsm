@@ -394,7 +394,7 @@ $("ask").addEventListener("click", async () => {
 $("task").addEventListener("keydown", ev => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("ask").click(); } });
 $("reset").addEventListener("click", async () => {
   if (!confirm("Start a new night? This makes a fresh care home and a fresh chain.")) return;
-  await fetch("/api/reset", { method: "POST" });
+  await fetch("/api/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   raw = ""; open.clear(); poll();
 });
 $("scrub").addEventListener("input", () => { $("follow").checked = +$("scrub").value === data.states.length - 1; renderHome(); });
