@@ -1,5 +1,7 @@
 # DSM ethical autonomy prototype
 
+**Status: experimental.** A research prototype, run only against a simulated world. It is not part of DSM, and not for use with a real body, real people or real value.
+
 A fully local proof of concept. An AI with a body proposes what to do next as pre-commit futures. Deterministic rules decide which may become a real step on a Deterministic State Machine chain, from what the AI's own committed observations show. No AI judges anything. The AI stays free to think and to propose; the rules govern only what its body, its words and its other acts can do.
 
 **What "ethical" means here is the owner's definition of 2026-11-06,** worked out in conversation and written up in [docs/plans/2026-11-06-protected-life.md](docs/plans/2026-11-06-protected-life.md):
@@ -16,11 +18,11 @@ A fully local proof of concept. An AI with a body proposes what to do next as pr
 
 ## How it runs
 
-Four programs, and the model never shares a process with the keys.
+Four programs, and the model never shares a process with the keys. Two tools sit beside them: `ethical-sign-charter` makes the authority key and signs charters, and `ethical-trace` prints the enforcer's speed verdicts for the CBFpy cross-check.
 
 | Program | Holds | Does |
 |---|---|---|
-| `ethical-enforcer` | The device key, the chain on disk, the real DSM head, the world directory, and the body: here, a simulated world | Serves a Unix socket only its owner can open. Forks proposals, checks each from the parent's committed knowledge, commits the chosen one, writes it before installing it, then carries out its act and signs a receipt. When a step looks, it commits what the senses reported as its own link. Resumes a stored chain only after auditing it and replaying it through DSM |
+| `ethical-enforcer` | The device key, the chain on disk, the real DSM head, the world directory, and the body: here, a simulated world | Serves a Unix socket only its owner can open, or in separate-user mode only the agent's user. Forks proposals, checks each from the parent's committed knowledge, commits the chosen one, writes it before installing it, then carries out its act and signs a receipt. When a step looks, it commits what the senses reported as its own link. Resumes a stored chain only after auditing it and replaying it through DSM |
 | `ethical-agent` | No key, no charter and no view of the world but what its committed looks showed | Runs the model, sends its proposals, chooses among what it is told is allowed, and is told in words why anything was refused |
 | `ethical-console` | Public material only, and optionally the simulated world | A live view in your browser: a map of what the AI knows at each step, every candidate and why it was refused, the world, the audit, and what was really there |
 | `ethical-audit` | Public material only | Checks a stored chain link by link, each from its parent alone, replays it through DSM, checks every act's receipt, and checks that the world holds exactly what committed acts wrote |
@@ -77,6 +79,8 @@ This lives in [Irrefutable-Labs/cbfpy-dsm](https://github.com/Irrefutable-Labs/c
 
 Commands run from this `dsm/` directory. The toolchain comes from `rust-toolchain.toml` here, the same Rust as DSM's.
 
+DSM's build needs `protoc` (`apt-get install protobuf-compiler` or `brew install protobuf`). On Linux, `run` acts and their tests need `/usr/bin/bwrap` (`apt-get install bubblewrap`), and on Ubuntu 24.04 also `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`.
+
 Build:
 
 ```bash
@@ -107,7 +111,7 @@ Run the scripted wall scenario from another. The others are `road`, `house` and 
 ./target/release/ethical-agent --socket run/s --situations scenarios/runs/wall.json
 ```
 
-Replay the recorded run of the real model against a fresh store and a fresh copy of the wall world:
+Replay the recorded run of the real model against a fresh store and a fresh copy of the wall world. Stop the enforcer, run `rm -rf run/store run/world && cp scenarios/worlds/wall.json run/sim.json`, start it again, then:
 
 ```bash
 ./target/release/ethical-agent --socket run/s --situations scenarios/runs/wall.json --replay scenarios/recorded_model_run.json
@@ -153,6 +157,8 @@ Keep the seed off the machine that runs the AI.
 
 The van's speed limit is a control barrier function: `h = s - v² / 2a`, the road seen clear less the distance needed to stop. `cbfpy/ethics/braking.py` poses it to CBFpy. The cross-check holds every one of the enforcer's speed verdicts to `h ≥ 0`, and runs a van from each allowed state under CBFpy's safety filter to show it never gets nearer the end of what it has seen than its own stopping distance. From the repository root:
 
+The test builds and runs `ethical-trace` with cargo, so the Rust prerequisites above apply.
+
 ```bash
 uv venv --python 3.12 .venv && VIRTUAL_ENV=.venv uv pip install -e .
 ```
@@ -182,7 +188,7 @@ Then give the agent any GGUF file. The recorded run used DeepSeek-R1 8B. The pro
 On macOS, the recorded run had internet access denied to both programs, and the agent was also denied any read of the seed, the store or the simulated world, and any write to the world. To do the same, start the enforcer under the first profile and the agent under the second:
 
 ```bash
-sandbox-exec -p '(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))' ./target/release/ethical-enforcer --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub --device-seed run/seed --socket run/s --sim run/sim.json --sim run/sim.json
+sandbox-exec -p '(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))' ./target/release/ethical-enforcer --store run/store --world run/world --charter scenarios/charter.json --signature scenarios/charter.sig --authority scenarios/authority.pub --device-seed run/seed --socket run/s --sim run/sim.json
 ```
 
 ```bash
@@ -191,7 +197,7 @@ sandbox-exec -p "(version 1)(allow default)(deny network-outbound (remote ip))(d
 
 ## Continuous integration
 
-`.github/workflows/dsm-ethical-autonomy.yml` runs the Rust tests, formatting and Clippy, the CBFpy cross-check and the Lean proofs on every push and pull request.
+`.github/workflows/dsm-ethical-autonomy.yml` runs the Rust tests on Linux and macOS, and formatting, Clippy, the CBFpy cross-check and the Lean proofs on Linux. It runs on every pull request and on pushes to `main` and `dsm-ethical-autonomy`.
 
 ## Foundations and operational permissions
 

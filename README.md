@@ -1,5 +1,7 @@
 # CBFpy for DSM
 
+**Experimental.** This is a research prototype that runs only in a simulated world. It is not part of DSM and not for real use.
+
 **This fork, by Irrefutable Labs, adds a DSM ethical autonomy prototype.** An AI with a body proposes what to do next, and deterministic rules decide which may become a real step on a [Deterministic State Machine](https://github.com/deterministicstatemachine/dsm) chain: it may not harm or endanger any animal bigger than a baby mouse, or any honeybee; anything it has not seen counts as occupied; it may not leave anyone worse off than they are now; and without working senses its body does nothing. CBFpy checks the van's braking limit independently as a control barrier function.
 
 - [`dsm/`](dsm/README.md): the checks, the DSM adapter, the simulated world and scenarios, the Lean proofs and the report.
