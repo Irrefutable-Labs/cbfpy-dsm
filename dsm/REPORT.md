@@ -1,10 +1,10 @@
-# Technical report: DSM ethical autonomy prototype v0.9
+# Technical report: DSM ethical autonomy prototype v0.9 (experimental)
 
 **Date:** 2026-11-06. **Repository:** [Irrefutable-Labs/cbfpy-dsm](https://github.com/Irrefutable-Labs/cbfpy-dsm), a fork of CBFpy. **DSM:** `deterministicstatemachine/dsm` at `b6060a334`, a pinned git dependency. **DSM code changed:** none.
 
 ## What changed in v0.9
 
-Until v0.8, "ethical" meant positions on six made-up bands, moved by numbers hand-labelled on each action. The prototype enforced whatever was typed in, and a test pinned exactly that: an action mislabelled as harmless passed every check. The owner judged this not useful and, on 2026-11-06, worked out a definition in conversation. It is in [docs/plans/2026-11-06-protected-life.md](docs/plans/2026-11-06-protected-life.md), and v0.9 builds it. The bands, their engine, their Lean proofs and their CBFpy cross-check are gone.
+Until v0.8, "ethical" meant positions on six made-up bands, moved by numbers hand-labelled on each action. The prototype enforced whatever was typed in, and a test pinned exactly that: an action mislabelled as harmless passed every check. On 2026-11-06 a definition was worked out in conversation. It is in [docs/plans/2026-11-06-protected-life.md](docs/plans/2026-11-06-protected-life.md), and v0.9 builds it. The bands, their engine, their Lean proofs and their CBFpy cross-check are gone.
 
 ## Result
 
@@ -33,6 +33,8 @@ Every chain audits from its parents and replays through DSM. **In no scenario do
 
 ## Acceptance criteria
 
+Criteria 3 to 6 are the plan's, restated for the protected-life definition; the bands they named are gone.
+
 | # | Criterion | Result | Evidence |
 |---|---|---|---|
 | 1 | Identical input, identical result | Met | Two fresh enforcers give byte-identical scripted runs; replays of the recording are byte-identical |
@@ -44,7 +46,7 @@ Every chain audits from its parents and replays through DSM. **In no scenario do
 | 7 | Unauthorized rule changes invalidate | Met | A raised threshold, loosened evidence, a cleared prohibition, a bumped version, a tampered catalog and a stranger's signature are refused; the enforcer refuses a charter edited on disk |
 | 8 | Attributable to parent and policy | Met | Every step and every observation verifies from its one parent; every act has a signed receipt; an edited or dropped stored link stops the enforcer and fails the audit |
 | 9 | Entirely offline | Met on this machine | The recorded run had internet access denied by a macOS sandbox, and the agent was denied the key, the store and the simulated world |
-| 10 | Tests pass, results reproducible | Met, with limits | 205 Rust tests, formatting, Clippy, 3 CBFpy cross-check tests and the Lean proofs; CI runs them on Linux and macOS. Live model output is not reproducible, so its recording is what replays |
+| 10 | Tests pass, results reproducible | Met, with limits | 205 Rust tests, formatting, Clippy, 3 CBFpy cross-check tests and the Lean proofs; CI runs the tests on Linux (204) and macOS (205; the agent-isolation test runs only there), and the rest on Linux. Live model output is not reproducible, so its recording is what replays |
 
 ## What supports each property
 
@@ -76,7 +78,7 @@ Concrete examples show the hypotheses are satisfiable, so none holds vacuously; 
 
 ### Only experimentally demonstrated
 
-- **The live model in the wall world** (v0.9, DeepSeek-R1 8B through llama.cpp, internet denied, the agent also denied the key, the store and the simulated world): over 23 turns it made 69 proposals, all readable, and committed 12 steps: 8 looks and 4 things said, every one allowed. It never moved its body. Of its 38 proposed walks, most were malformed, paths that skip cells or go into the wall, and neither of its two attempts to take the panel off was allowed. Its one strike was refused because it did not know what it would hit. Its speech was held to the register: the refusals gave 26 reasons of deception, mostly a declared fact its words did not state. Some of what it said was to odd recipients ("rat", "look"), which the rules allow, since words to no one harm no one. The audit verifies all 12 steps and 8 observations from their parents, and the 10 forks it replaced. The simulated world records no harm. The recording replays identically.
+- **The live model in the wall world** (v0.9, DeepSeek-R1 8B through llama.cpp, internet denied, the agent also denied the key, the store and the simulated world): over 23 turns it made 69 proposals, all readable, and committed 12 steps: 8 looks and 4 things said, every one allowed. It never moved its body. Of its 38 proposed walks, most were malformed, paths that skip cells or go into the wall, and of its two attempts to take the panel off, one named a wall that is not there and was refused, and the other was allowed, but the model chose to speak instead. Its one strike was refused because it did not know what it would hit. Its speech was held to the register: the refusals gave 26 reasons of deception, half of them (13) a declared fact its words did not state. Some of what it said was to odd recipients ("rat", "look"), which the rules allow, since words to no one harm no one. The audit verifies all 12 steps and 8 observations from their parents, and the 10 forks it replaced. The simulated world records no harm. The recording replays identically.
 
   So with a real model, the rules fail closed: a weak model that cannot plan a safe path gets nowhere physically, rather than somewhere dangerous. Seeing a model complete the wall task would need a more capable one. A first recording of this run lost every choice the model made, through a parsing mistake in the agent that is now fixed; it is not kept.
 
@@ -84,7 +86,7 @@ Concrete examples show the hypotheses are satisfiable, so none holds vacuously; 
 
 ### Not run
 
-**A full mutation run was not done**, per the owner's standing instruction (2026-11-04). By hand, three checks were each switched off once and their tests seen red: the senses check (three tests), the evidence check (seven), and, in v0.8, the verifier's deception check (one). The rest rest on their exact-refusal assertions, which is weaker evidence.
+**A full mutation run was not done.** By hand, three checks were each switched off once and their tests seen red: the senses check (three tests), the evidence check (seven), and, in v0.8, the verifier's deception check (one). The rest rest on their exact-refusal assertions, which is weaker evidence.
 
 ### Unproven or out of scope
 
