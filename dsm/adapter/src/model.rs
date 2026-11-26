@@ -209,6 +209,20 @@ pub fn knowledge_text(k: &Knowledge) -> String {
     lines.join("\n")
 }
 
+/// What one request for candidate acts carries: the task and everything the model is shown.
+#[derive(Clone, Copy)]
+pub struct ProposeRequest<'a> {
+    pub task: &'a str,
+    pub directory: &'a [String],
+    pub knows: &'a Knowledge,
+    pub facts: &'a [Fact],
+    pub history: &'a [String],
+    pub safe: &'a [(String, i32, i32)],
+    pub guidance: &'a [String],
+    /// How many candidates to ask for.
+    pub n: u32,
+    pub turn: u64,
+}
 impl Ollama {
     fn generate(&self, prompt: &str, format: Value, seed: u64) -> Result<String, String> {
         let body = json!({
@@ -232,18 +246,18 @@ impl Ollama {
 
     /// Ask for `n` candidate acts toward the task. Answers that are not a well-formed act are
     /// counted, and reach nothing.
-    pub fn propose(
-        &self,
-        task: &str,
-        directory: &[String],
-        knows: &Knowledge,
-        facts: &[Fact],
-        history: &[String],
-        safe: &[(String, i32, i32)],
-        guidance: &[String],
-        n: u32,
-        turn: u64,
-    ) -> Result<(Vec<Proposal>, u32), String> {
+    pub fn propose(&self, request: &ProposeRequest) -> Result<(Vec<Proposal>, u32), String> {
+        let ProposeRequest {
+            task,
+            directory,
+            knows,
+            facts,
+            history,
+            safe,
+            guidance,
+            n,
+            turn,
+        } = *request;
         let done = if history.is_empty() {
             "You have done nothing for this request yet.".to_string()
         } else {

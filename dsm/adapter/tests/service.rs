@@ -16,8 +16,6 @@ fn root() -> PathBuf {
 /// A fresh store, seed, socket and simulated world for one test.
 struct Place {
     dir: PathBuf,
-    /// Which scenario: its world in `scenarios/worlds`, its scripted run in `scenarios/runs`.
-    scenario: &'static str,
 }
 
 impl Place {
@@ -43,7 +41,7 @@ impl Place {
             dir.join("sim.json"),
         )
         .expect("world");
-        Place { dir, scenario }
+        Place { dir }
     }
 
     fn sim(&self) -> PathBuf {

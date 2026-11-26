@@ -4,6 +4,7 @@
 
 use crate::enforcer::Proposal;
 use crate::fork::Outcome;
+use crate::model::ProposeRequest;
 use crate::protocol::{receive, send, Request, Response};
 use crate::report::FutureReport;
 use ethical_world::knowledge::Knowledge;
@@ -358,17 +359,17 @@ impl Mind for Live<'_> {
         guidance: &[String],
         turn: u64,
     ) -> Result<RecordedTurn, String> {
-        let (proposals, unreadable) = self.model.propose(
-            &self.task,
-            &self.directory,
+        let (proposals, unreadable) = self.model.propose(&ProposeRequest {
+            task: &self.task,
+            directory: &self.directory,
             knows,
-            &self.facts,
-            &self.history,
-            &self.safe_temperatures,
+            facts: &self.facts,
+            history: &self.history,
+            safe: &self.safe_temperatures,
             guidance,
-            self.candidates,
+            n: self.candidates,
             turn,
-        )?;
+        })?;
         Ok(RecordedTurn {
             proposals,
             unreadable,
