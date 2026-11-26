@@ -3,6 +3,8 @@
 
 Pasted by the owner into the session on 2026-11-05. Built in `dsm/` of Irrefutable-Labs/cbfpy-dsm, where `REPORT.md` records how each criterion came out.
 
+**Superseded in part.** On 2026-11-06 the six bands, their tension and coupling (sections 3 and 4, stages 1 and 2, criteria 3 to 5) were replaced by the protected-life definition in [docs/plans/2026-11-06-protected-life.md](docs/plans/2026-11-06-protected-life.md). The text below is the plan as pasted.
+
 ### 1. Objective
 
 Build a fully local, software-only proof of concept demonstrating that an AI can explore alternative decisions while remaining within mathematically defined ethical boundaries, enforced through cryptographically authenticated DSM state transitions.

@@ -1,6 +1,6 @@
 [package]
 name = "ethical-autonomy-adapter"
-description = "Experimental binding of ethical band decisions to existing DSM state transitions."
+description = "Experimental binding of protected-life decisions to existing DSM state transitions."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,5 +1,7 @@
 # CBFpy for DSM
 
+**Experimental.** This is a research prototype that runs only in a simulated world. It is not part of DSM and not for real use.
+
 **This fork, by Irrefutable Labs, adds a DSM ethical autonomy prototype.** A local AI runs a small care home's control system on the night shift, and deterministic rules decide which of the acts it proposes may become a real step on a [Deterministic State Machine](https://github.com/deterministicstatemachine/dsm) chain: it may not harm or endanger any animal bigger than a baby mouse, or any honeybee, wherever they are; anything it has not established counts as possibly affecting anyone; it may not leave anyone worse off than they are now; and when its data feeds fail, it changes nothing. No AI judges anything. CBFpy checks the heating limit independently as a control barrier function.
 
 **Try it:** with [Ollama](https://ollama.com) and `ollama pull deepseek-r1:8b`, run `cargo build --release && ./target/release/ethical-app` in [`dsm/`](dsm/README.md#try-it) and open http://127.0.0.1:8780/.

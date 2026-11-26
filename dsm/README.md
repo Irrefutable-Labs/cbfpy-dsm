@@ -1,5 +1,7 @@
 # DSM ethical autonomy prototype
 
+**Status: experimental.** A research prototype, run only against a simulated world. It is not part of DSM, and not for use with a real body, real people or real value.
+
 A local AI runs a small care home's control system on the night shift: it reads the rooms and the residents' records, sets the heating, locks doors, gives medication, sprays the garden. Before anything it proposes happens, deterministic rules decide whether it may become a real step on a Deterministic State Machine chain. No AI judges anything. The AI stays free to think and to propose; the rules govern only what it does.
 
 **What "ethical" means here is the owner's definition of 2026-11-06,** written up in [docs/plans/2026-11-06-protected-life.md](docs/plans/2026-11-06-protected-life.md):
@@ -36,7 +38,7 @@ Any model Ollama has works: `--model llama3.2:3b`, for example. Ollama holds eve
 
 ## How it runs
 
-Five programs, and the model never shares a process with the keys.
+Five programs, and the model never shares a process with the keys. Two tools sit beside them: `ethical-sign-charter` makes the authority key and signs charters, and `ethical-trace` prints the enforcer's speed verdicts for the CBFpy cross-check.
 
 | Program | Holds | Does |
 |---|---|---|
@@ -96,6 +98,8 @@ This lives in [Irrefutable-Labs/cbfpy-dsm](https://github.com/Irrefutable-Labs/c
 ## Run the pieces by hand
 
 Commands run from this `dsm/` directory. The toolchain comes from `rust-toolchain.toml` here, the same Rust as DSM's.
+
+DSM's build needs `protoc` (`apt-get install protobuf-compiler` or `brew install protobuf`). On Linux, `run` acts and their tests need `/usr/bin/bwrap` (`apt-get install bubblewrap`), and on Ubuntu 24.04 also `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`.
 
 Make a device seed that only you can read, and copy the care home to run in (the enforcer changes it as the AI acts):
 
@@ -165,6 +169,8 @@ Keep the seed off the machine that runs the AI.
 
 The heating limit is a control barrier function: a room's temperature must stay inside the band everyone the setting counts can bear, `lo ≤ T ≤ hi`. `cbfpy/ethics/heating.py` poses it to CBFpy. The cross-check holds every one of the enforcer's heating verdicts, for each protected species and for a room no one has read, to that band, and drives a room toward every setting under CBFpy's safety filter: it reaches the setting exactly when the enforcer allows it, and never leaves the band. From the repository root:
 
+The test builds and runs `ethical-trace` with cargo, so the Rust prerequisites above apply.
+
 ```bash
 uv venv --python 3.12 .venv && VIRTUAL_ENV=.venv uv pip install -e .
 ```
@@ -175,7 +181,7 @@ uv venv --python 3.12 .venv && VIRTUAL_ENV=.venv uv pip install -e .
 
 ## Continuous integration
 
-`.github/workflows/dsm-ethical-autonomy.yml` runs the Rust tests, formatting and Clippy, the CBFpy cross-check and the Lean proofs on every push and pull request.
+`.github/workflows/dsm-ethical-autonomy.yml` runs the Rust tests on Linux and macOS, and formatting, Clippy, the CBFpy cross-check and the Lean proofs on Linux. It runs on every pull request and on pushes to `main` and `dsm-ethical-autonomy`.
 
 ## Foundations and operational permissions
 

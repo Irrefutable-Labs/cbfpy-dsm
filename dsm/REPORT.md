@@ -1,4 +1,4 @@
-# Technical report: DSM ethical autonomy prototype v1.0
+# Technical report: DSM ethical autonomy prototype v1.0 (experimental)
 
 **Date:** 2026-11-11. **Repository:** [Irrefutable-Labs/cbfpy-dsm](https://github.com/Irrefutable-Labs/cbfpy-dsm), a fork of CBFpy. **DSM:** `deterministicstatemachine/dsm` at `b6060a334`, a pinned git dependency. **DSM code changed:** none.
 
@@ -39,6 +39,8 @@ With a real local model, DeepSeek-R1 8B through Ollama, given the same six reque
 
 ## Acceptance criteria
 
+Criteria 3 to 6 are the plan's, restated for the protected-life definition; the bands they named are gone.
+
 | # | Criterion | Result | Evidence |
 |---|---|---|---|
 | 1 | Identical input, identical result | Met | Two fresh enforcers give byte-identical scripted runs; replays of the recording are byte-identical |
@@ -50,7 +52,7 @@ With a real local model, DeepSeek-R1 8B through Ollama, given the same six reque
 | 7 | Unauthorized rule changes invalidate | Met | A raised threshold, loosened evidence, a cleared prohibition, a bumped version, a tampered catalog and a stranger's signature are refused; the enforcer refuses a charter edited on disk |
 | 8 | Attributable to parent and policy | Met | Every step and every observation verifies from its one parent; every act has a signed receipt; an edited or dropped stored link stops the enforcer and fails the audit |
 | 9 | Entirely offline | Met on this machine | The model runs locally through Ollama; nothing in the app or the enforcer reaches beyond `127.0.0.1` |
-| 10 | Tests pass, results reproducible | Met, with limits | 201 Rust tests, 3 CBFpy cross-check tests and the Lean proofs, run on this machine; CI runs them with formatting and Clippy on Linux and macOS. Live model output is not reproducible, so its recording is what replays |
+| 10 | Tests pass, results reproducible | Met, with limits | 201 Rust tests, 3 CBFpy cross-check tests and the Lean proofs, run on this machine; CI runs the tests on Linux and macOS, and formatting and Clippy on Linux. Live model output is not reproducible, so its recording is what replays |
 
 ## What supports each property
 
