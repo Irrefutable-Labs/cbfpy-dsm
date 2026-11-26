@@ -12,7 +12,7 @@ use crate::hexser::to_hex;
 use crate::store::ChainStore;
 use ethical_world::check::{explain, Effect, Severity};
 use ethical_world::knowledge::Knowledge;
-use ethical_world::{Cell, Operational};
+use ethical_world::Operational;
 use serde::Serialize;
 use std::path::Path;
 
@@ -56,7 +56,8 @@ pub struct CharterView {
     /// Every listed species, and whether it is protected.
     pub species: Vec<SpeciesView>,
     pub threshold_mg: u64,
-    pub smallest_protected_mm: u32,
+    /// The temperatures every protected species can bear: what an unread room is held to.
+    pub safe_for_anyone: (i32, i32),
     pub prohibited: Vec<String>,
     pub operational: Operational,
     /// The hash of what no update may change: who is protected, and what is never done.
@@ -73,7 +74,8 @@ pub struct SpeciesView {
     pub name: String,
     pub kind: ethical_world::Kind,
     pub adult_mass_mg: u64,
-    pub length_mm: u32,
+    pub safe_min_c: i32,
+    pub safe_max_c: i32,
     pub protected: bool,
 }
 
@@ -100,7 +102,7 @@ pub struct CandidateView {
     pub outcome: Outcome,
     pub reasons: Vec<String>,
     pub body: Option<ethical_world::Act>,
-    pub reach: Vec<Cell>,
+    pub reach: Vec<String>,
     pub severity: Option<Severity>,
     pub effects: Vec<Effect>,
     pub act: String,
@@ -155,21 +157,20 @@ fn act_words(act: &Act) -> String {
 fn body_words(act: &ethical_world::Act) -> String {
     use ethical_world::Act as B;
     match act {
-        B::Observe { cells } => format!("looks at {} cells", cells.len()),
+        B::Observe { sources } => format!("reads {}", sources.join(", ")),
         B::Speak { to, .. } => format!("says to {to}"),
         B::Wait {} => "waits".to_string(),
-        B::Move { path } => format!("walks to {:?}", path.last().unwrap_or(&(0, 0))),
-        B::Drive { path, speed_cm_s } => format!(
-            "drives to {:?} at {}cm/s",
-            path.last().unwrap_or(&(0, 0)),
-            speed_cm_s
+        B::Lock { room } => format!("locks {room}"),
+        B::Unlock { room } => format!("unlocks {room}"),
+        B::SetHeat { room, celsius } => format!("sets {room} to {celsius} °C"),
+        B::GiveMedication { resident, drug } => format!("gives {resident} {drug}"),
+        B::CancelDose { resident, drug } => format!("cancels {resident}'s {drug}"),
+        B::Spray { zone, insecticide } => format!(
+            "sprays {zone} with {}",
+            if *insecticide { "insecticide" } else { "water" }
         ),
-        B::Strike { target, depth_mm } => format!("strikes {target:?}, {depth_mm}mm deep"),
-        B::RemovePanel { wall } => format!("takes the panel off the wall at {wall:?}"),
-        B::Lock { door } => format!("locks the door at {door:?}"),
-        B::Unlock { door } => format!("unlocks the door at {door:?}"),
-        B::AimWeapon { at } => format!("aims a weapon at {at:?}"),
-        B::FireWeapon { at } => format!("fires a weapon at {at:?}"),
+        B::Restrain { resident } => format!("restrains {resident}"),
+        B::DisableFireAlarm {} => "switches off the fire alarm".to_string(),
     }
 }
 
@@ -177,7 +178,7 @@ fn state_view(policy: &crate::charter::Policy, s: &AttestedState) -> StateView {
     StateView {
         sequence: s.sequence,
         knowledge: s.knowledge.clone(),
-        blind: ethical_world::check::senses(&policy.operational, &s.knowledge).err(),
+        blind: ethical_world::check::feeds(&policy.operational, &s.knowledge).err(),
     }
 }
 
@@ -284,12 +285,13 @@ fn charter_view(charter: &SignedCharter, history: Vec<String>) -> CharterView {
                 name: s.name.clone(),
                 kind: s.kind,
                 adult_mass_mg: s.adult_mass_mg,
-                length_mm: s.length_mm,
+                safe_min_c: s.safe_min_c,
+                safe_max_c: s.safe_max_c,
                 protected: f.is_protected(&s.name),
             })
             .collect(),
         threshold_mg: f.threshold_mg,
-        smallest_protected_mm: f.smallest_protected_mm(),
+        safe_for_anyone: f.safe_for_anyone(),
         prohibited: f.prohibited.iter().map(|k| format!("{k:?}")).collect(),
         operational: policy.operational.clone(),
         foundation: to_hex(&crate::update::foundation_hash(policy)),

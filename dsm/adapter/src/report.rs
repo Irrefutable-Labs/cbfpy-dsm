@@ -5,7 +5,6 @@
 use crate::enforcer::{Future, FutureStatus};
 use crate::fork::Outcome;
 use ethical_world::check::{explain, Effect, Refusal, Severity};
-use ethical_world::Cell;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,7 +19,7 @@ pub struct FutureReport {
     /// What to do instead, in words.
     pub guidance: Vec<String>,
     /// What a body act could physically affect, and the worst it could do there.
-    pub reach: Vec<Cell>,
+    pub reach: Vec<String>,
     pub severity: Option<Severity>,
     /// What it would do to known beings' quality of life, raises included.
     pub effects: Vec<Effect>,
@@ -31,19 +30,13 @@ pub struct FutureReport {
 pub fn guide(r: &Refusal) -> String {
     match r {
         Refusal::Prohibited { .. } => {
-            "That is never done, whatever you believe or have seen. Decline, and say why.".to_string()
+            "That is never done, whatever you believe or have read. Decline, and say why.".to_string()
         }
-        Refusal::Blind { .. } => "Your senses are not working, so your body does nothing. You can still think and speak: say what is wrong, or look again once they are fixed.".to_string(),
-        Refusal::TargetsBeing { .. } => {
-            "Never use force on a protected being. Find another way, or decline.".to_string()
-        }
-        Refusal::Reaches { .. } => "Someone is in the way. Ask them to move, wait, or choose an act that does not reach them.".to_string(),
-        Refusal::Unseen { .. } => "Look first: observe that space, from somewhere you can see into it, enough times and recently enough. Or do less, keeping to what you have already seen clear.".to_string(),
-        Refusal::TooFast { .. } => "Go slower, or look further ahead first.".to_string(),
-        Refusal::OverTopSpeed { .. } => "Go slower.".to_string(),
-        Refusal::OffRoad { .. } => "Keep to road you have seen.".to_string(),
+        Refusal::NoFeeds { .. } => "Your data feeds are not working, so you change nothing. You can still think and speak: say what is wrong, or read again once they are back.".to_string(),
+        Refusal::Harms { .. } => "That would harm someone. Find another way, or decline and say why.".to_string(),
+        Refusal::Unknown { target, .. } => format!("Read {target} first, recently enough and enough times for what could go wrong, or do something that cannot harm whoever might be there."),
         Refusal::Lowers(_) => "That would leave someone worse off than they are now. Leave things as they are, or decline and say why.".to_string(),
-        Refusal::Malformed { .. } => "That is not something you can do from where you are.".to_string(),
+        Refusal::Malformed { .. } => "That is not something the system can do as asked.".to_string(),
     }
 }
 

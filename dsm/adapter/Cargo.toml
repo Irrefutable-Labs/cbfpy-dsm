@@ -13,6 +13,12 @@ dsm = { git = "https://github.com/deterministicstatemachine/dsm", rev = "b6060a3
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 libc = "0.2"
+# To ask a local model through Ollama, on this machine only. No TLS: it never leaves localhost.
+ureq = { version = "2.12", default-features = false, features = ["json"] }
+
+[[bin]]
+name = "ethical-app"
+path = "src/bin/app.rs"
 
 [[bin]]
 name = "ethical-enforcer"

@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "room:ada_room",
+    "room:ben_room",
+    "room:lounge",
+    "room:office",
+    "records:ada",
+    "records:ben",
+    "zone:garden"
+  ]
+}

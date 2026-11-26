@@ -10,7 +10,7 @@ use ethical_autonomy_adapter::{
     audit_chain, steps_as_links, AdapterError, Enforcer, FutureStatus, Link, SignedCharter,
 };
 use ethical_world::sim::World;
-use ethical_world::{Act, ActKind, Cell};
+use ethical_world::{Act, ActKind};
 
 /// Version 2 asks for two looks before even a step that could only injure.
 fn v2_stricter() -> SignedCharter {
@@ -21,13 +21,13 @@ fn v2_stricter() -> SignedCharter {
 }
 
 /// A look through the enforcer, returning the two links it makes.
-fn look_links(e: &mut Enforcer, w: &mut World, cells: &[Cell]) -> Vec<Link> {
+fn look_links(e: &mut Enforcer, w: &mut World, names: &[&str]) -> Vec<Link> {
     let futures = e.fork(&[body(Act::Observe {
-        cells: cells.to_vec(),
+        sources: sources(names),
     })]);
     let step = e.commit(&futures[0]).expect("look");
     let seen = e
-        .record_observation(w.observe(cells), |_| Ok(()))
+        .record_observation(w.observe(&sources(names)), |_| Ok(()))
         .expect("observation");
     vec![Link::Step(Box::new(step)), Link::Observed(Box::new(seen))]
 }
@@ -48,10 +48,10 @@ fn the_foundation_cannot_change_whoever_signs() {
     let mut fewer_protected = policy();
     fewer_protected.version = 2;
     fewer_protected.foundation.threshold_mg = 1_000_000;
-    let mut weapons_allowed = policy();
-    weapons_allowed.version = 2;
-    weapons_allowed.foundation.prohibited = vec![ActKind::AimWeapon];
-    for p in [no_prohibition, fewer_protected, weapons_allowed] {
+    let mut fire_alarm_allowed = policy();
+    fire_alarm_allowed.version = 2;
+    fire_alarm_allowed.foundation.prohibited = vec![ActKind::Restrain];
+    for p in [no_prohibition, fewer_protected, fire_alarm_allowed] {
         assert_ne!(foundation_hash(&p), foundation_hash(&policy()));
         let signed = SignedCharter::sign(p, catalog(), &keys().authority).expect("sign");
         assert_eq!(
@@ -83,21 +83,25 @@ fn an_update_signed_by_anyone_but_the_authority_is_refused() {
     );
 }
 
-/// The chain moves to version 2. What the body may do changes, the update is a step of its own,
+/// The chain moves to version 2. What the AI may do changes, the update is a step of its own,
 /// and the whole history, both charters included, audits and resumes.
 #[test]
 fn an_update_takes_effect_and_the_history_audits_and_resumes() {
     let mut e = enforcer();
-    let mut w = corridor(vec![]);
+    let mut w = care_home(vec![]);
     let genesis = e.state();
-    let mut links = look_links(&mut e, &mut w, &[(1, 0)]);
-    let walk = body(Act::Move { path: vec![(1, 0)] });
+    let mut links = look_links(&mut e, &mut w, &["room:office"]);
+    // 29 °C is past what a person can bear, so it needs the office read; 20 °C would not.
+    let walk = body(Act::SetHeat {
+        room: "office".to_string(),
+        celsius: 29,
+    });
     assert!(
         matches!(
             e.fork(std::slice::from_ref(&walk))[0].status,
             FutureStatus::Eligible(_)
         ),
-        "one look is enough under version 1"
+        "one read is enough under version 1"
     );
     let before = e.knowledge().clone();
     let update = e
@@ -108,7 +112,7 @@ fn an_update_takes_effect_and_the_history_audits_and_resumes() {
         before.beings,
         "an update changes no knowledge"
     );
-    assert_eq!(e.knowledge().looks, before.looks);
+    assert_eq!(e.knowledge().reads, before.reads);
     assert_eq!(e.charter().policy.version, 2);
     links.push(Link::Update(Box::new(update)));
     assert!(
@@ -116,9 +120,9 @@ fn an_update_takes_effect_and_the_history_audits_and_resumes() {
             e.fork(std::slice::from_ref(&walk))[0].status,
             FutureStatus::Rejected(_)
         ),
-        "version 2 wants a second look"
+        "version 2 wants a second read"
     );
-    links.extend(look_links(&mut e, &mut w, &[(1, 0)]));
+    links.extend(look_links(&mut e, &mut w, &["room:office"]));
     let futures = e.fork(&[walk]);
     let walked = e.commit(&futures[0]).expect("now allowed");
     links.push(Link::Step(Box::new(walked)));
@@ -190,7 +194,7 @@ fn a_tampered_update_record_fails_the_audit() {
     assert!(audit(swapped).is_err());
 
     let mut moved = update.clone();
-    moved.successor.knowledge.body = (5, 5);
+    moved.successor.knowledge.feeds_ok_at = Some(99);
     assert!(audit(moved).is_err());
 
     let mut unsigned = update;

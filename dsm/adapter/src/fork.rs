@@ -152,7 +152,7 @@ pub fn record_candidate(
 ) -> (CandidateRecord, Option<Evaluation>) {
     let policy = charter.policy_hash();
     // A body act goes by the reserved name and carries its act; anything else is a catalog row.
-    let is_body = proposal.action == crate::charter::BODY && proposal.body.is_some();
+    let is_body = proposal.action == crate::charter::SYSTEM && proposal.body.is_some();
     let row = if proposal.body.is_some() {
         None
     } else {
@@ -193,17 +193,22 @@ pub fn record_candidate(
 
 /// A body act within the bounds a step may carry.
 fn body_fits(act: &ethical_world::Act) -> bool {
+    let name = |x: &String| crate::act::simple_name(x);
     match act {
         ethical_world::Act::Speak { to, text } => {
-            crate::act::simple_name(to)
-                && !text.trim().is_empty()
-                && text.len() <= crate::act::MAX_TEXT
+            name(to) && !text.trim().is_empty() && text.len() <= crate::act::MAX_TEXT
         }
-        ethical_world::Act::Observe { cells } => !cells.is_empty() && cells.len() <= 64,
-        ethical_world::Act::Move { path } | ethical_world::Act::Drive { path, .. } => {
-            !path.is_empty() && path.len() <= 32
+        ethical_world::Act::Observe { sources } => {
+            !sources.is_empty() && sources.len() <= 32 && sources.iter().all(|s| s.len() <= 64)
         }
-        _ => true,
+        ethical_world::Act::Lock { room }
+        | ethical_world::Act::Unlock { room }
+        | ethical_world::Act::SetHeat { room, .. } => name(room),
+        ethical_world::Act::GiveMedication { resident, drug }
+        | ethical_world::Act::CancelDose { resident, drug } => name(resident) && name(drug),
+        ethical_world::Act::Spray { zone, .. } => name(zone),
+        ethical_world::Act::Restrain { resident } => name(resident),
+        ethical_world::Act::Wait {} | ethical_world::Act::DisableFireAlarm {} => true,
     }
 }
 

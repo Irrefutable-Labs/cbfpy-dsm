@@ -413,15 +413,15 @@ pub fn perform(
     Ok(outputs)
 }
 
-/// What a body act writes in the world: words to their recipient, what it saw, or an account of
-/// what the body did. Waiting writes nothing.
+/// What a system act writes in the world: words to their recipient, what was read, or an account
+/// of what the system did. Waiting writes nothing.
 pub fn body_paths(sequence: u64, act: &ethical_world::Act) -> Vec<String> {
     let n = format!("{sequence:06}");
     match act {
         ethical_world::Act::Wait {} => vec![],
         ethical_world::Act::Speak { to, .. } => vec![format!("outbox/{to}/{n}.txt")],
         ethical_world::Act::Observe { .. } => vec![format!("looks/{n}.json")],
-        _ => vec![format!("body/{n}.txt")],
+        _ => vec![format!("system/{n}.txt")],
     }
 }
 
@@ -455,8 +455,8 @@ pub fn perform_body(
             sim.perform(act);
             Ok((vec![put(world, &paths[0], text.as_bytes())?], None))
         }
-        ethical_world::Act::Observe { cells } => {
-            let obs = sim.observe(cells);
+        ethical_world::Act::Observe { sources } => {
+            let obs = sim.observe(sources);
             let bytes =
                 serde_json::to_vec(&obs).map_err(|e| AdapterError::Effect(e.to_string()))?;
             Ok((vec![put(world, &paths[0], &bytes)?], Some(obs)))

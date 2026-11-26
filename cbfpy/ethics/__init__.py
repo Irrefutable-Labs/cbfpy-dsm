@@ -1,5 +1,5 @@
 """CBFpy problems that cross-check the DSM protected-life enforcer. They check; they never decide."""
 
-from cbfpy.ethics.braking import BrakingConfig
+from cbfpy.ethics.heating import HeatingConfig
 
-__all__ = ["BrakingConfig"]
+__all__ = ["HeatingConfig"]

@@ -1,97 +1,82 @@
-//! What the chain knows: the map as seen, who was seen where, where the body is, and when the senses
-//! last proved they work. It changes only by an observation the device attests, or by the expected
-//! result of an act the enforcer allowed. It is carried in each state, so a step is checked from
-//! its parent alone.
+//! What the chain knows: each data source's recent readings, the rooms and records as last read,
+//! who was reported where, and when the data feeds last proved they work. It changes only by an
+//! observation the device attests, or by the expected result of an act the enforcer allowed. It is
+//! carried in each state, so a step is checked from its parent alone.
 
-use crate::{Act, Cell, KnownBeing, Observation, Terrain};
+use crate::{Act, KnownBeing, Observation, Record, Room};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-
-/// One look into a cell.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Look {
-    pub at: u64,
-    pub resolution_mm: u32,
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Knowledge {
     /// The step this knowledge belongs to.
     pub step: u64,
-    pub body: Cell,
-    pub terrain: BTreeMap<String, Terrain>,
-    /// Looks into each cell, newest last, at most [`MAX_LOOKS`].
-    pub looks: BTreeMap<String, Vec<Look>>,
+    /// For each data source, the steps at which it was read, newest last, at most [`MAX_READS`].
+    pub reads: BTreeMap<String, Vec<u64>>,
+    pub rooms: BTreeMap<String, Room>,
+    pub records: BTreeMap<String, Record>,
     pub beings: Vec<KnownBeing>,
-    /// The last step at which the senses detected their marker.
-    pub senses_ok_at: Option<u64>,
-    /// The last step at which they failed to.
-    pub senses_failed_at: Option<u64>,
-    /// Cells an observation step asked to look at, until what it saw is committed. Nothing else
-    /// can happen in between.
+    /// The last step at which the feeds passed their health check, and the last they failed it.
+    pub feeds_ok_at: Option<u64>,
+    pub feeds_failed_at: Option<u64>,
+    /// Sources an observation step asked to read, until what came back is committed. Nothing
+    /// else can happen in between.
     #[serde(default)]
-    pub awaiting: Option<Vec<Cell>>,
+    pub awaiting: Option<Vec<String>>,
 }
 
-/// Looks kept per cell: more than any act needs.
-pub const MAX_LOOKS: usize = 4;
+/// Reads kept per source: more than any act needs.
+pub const MAX_READS: usize = 4;
 
-/// The key a cell is stored under, so the map serialises in a fixed order.
-pub fn key(c: Cell) -> String {
-    format!("{},{}", c.0, c.1)
+/// What a source reports on: `room:<id>` and `zone:<id>` report a place and who is in it;
+/// `records:<resident>` reports a resident's record.
+pub fn place_of(source: &str) -> Option<&str> {
+    source
+        .strip_prefix("room:")
+        .or_else(|| source.strip_prefix("zone:"))
 }
 
 impl Knowledge {
-    pub fn starting_at(body: Cell) -> Self {
-        Knowledge {
-            body,
-            ..Knowledge::default()
-        }
+    pub fn reads_of(&self, source: &str) -> &[u64] {
+        self.reads.get(source).map_or(&[], Vec::as_slice)
     }
 
-    pub fn terrain_at(&self, c: Cell) -> Option<&Terrain> {
-        self.terrain.get(&key(c))
-    }
-
-    pub fn looks_at(&self, c: Cell) -> &[Look] {
-        self.looks.get(&key(c)).map_or(&[], Vec::as_slice)
-    }
-
-    pub fn beings_at(&self, c: Cell) -> impl Iterator<Item = &KnownBeing> {
-        self.beings.iter().filter(move |b| b.cell == c)
+    pub fn beings_in<'a>(&'a self, place: &'a str) -> impl Iterator<Item = &'a KnownBeing> {
+        self.beings.iter().filter(move |b| b.place == place)
     }
 
     pub fn canonical_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
     }
 
-    /// The knowledge after an observation made at `at`. A sensor that missed its marker adds
-    /// nothing but the record that it failed.
+    /// The knowledge after an observation made at `at`. Feeds that failed their health check add
+    /// nothing but the record that they failed.
     pub fn observed(&self, obs: &Observation, at: u64) -> Knowledge {
         let mut k = self.clone();
         k.step = at;
         k.awaiting = None;
-        if !obs.marker_seen {
-            k.senses_failed_at = Some(at);
+        if !obs.healthy {
+            k.feeds_failed_at = Some(at);
             return k;
         }
-        k.senses_ok_at = Some(at);
-        for (c, t) in &obs.terrain {
-            k.terrain.insert(key(*c), t.clone());
-        }
-        for c in &obs.seen {
-            let looks = k.looks.entry(key(*c)).or_default();
-            looks.push(Look {
-                at,
-                resolution_mm: obs.resolution_mm,
-            });
-            if looks.len() > MAX_LOOKS {
-                looks.remove(0);
+        k.feeds_ok_at = Some(at);
+        for source in &obs.answered {
+            let reads = k.reads.entry(source.clone()).or_default();
+            reads.push(at);
+            if reads.len() > MAX_READS {
+                reads.remove(0);
             }
-            // Whoever was here before is wherever this look found them now.
-            k.beings.retain(|b| b.cell != *c);
+            // Whoever was reported here before is wherever this read found them now.
+            if let Some(place) = place_of(source) {
+                k.beings.retain(|b| b.place != place);
+            }
+        }
+        for (id, room) in &obs.rooms {
+            k.rooms.insert(id.clone(), room.clone());
+        }
+        for (id, record) in &obs.records {
+            k.records.insert(id.clone(), record.clone());
         }
         for b in &obs.beings {
             k.beings.retain(|x| x.id != b.id);
@@ -102,76 +87,62 @@ impl Knowledge {
     }
 
     /// The knowledge after an allowed act, as the act is expected to leave it at step `at`. What
-    /// it actually did is only known by looking again.
+    /// it actually did is only known by reading again.
     pub fn after(&self, act: &Act, at: u64) -> Knowledge {
         let mut k = self.clone();
         k.step = at;
         match act {
-            Act::Move { path } | Act::Drive { path, .. } => {
-                if let Some(last) = path.last() {
-                    k.body = *last;
+            Act::Observe { sources } => k.awaiting = Some(sources.clone()),
+            Act::Lock { room } | Act::Unlock { room } => {
+                if let Some(r) = k.rooms.get_mut(room) {
+                    r.locked = matches!(act, Act::Lock { .. });
                 }
             }
-            Act::RemovePanel { wall } => {
-                if let Some(Terrain::Wall { panel_on, .. }) = k.terrain.get_mut(&key(*wall)) {
-                    *panel_on = false;
+            Act::SetHeat { room, celsius } => {
+                if let Some(r) = k.rooms.get_mut(room) {
+                    r.celsius = *celsius;
                 }
             }
-            Act::Strike { target, depth_mm } => {
-                if let Some(Terrain::Wall { thickness_mm, .. }) = k.terrain.get(&key(*target)) {
-                    if depth_mm >= thickness_mm {
-                        k.terrain.insert(key(*target), Terrain::Open);
-                    } else {
-                        let left = thickness_mm - depth_mm;
-                        if let Some(Terrain::Wall { thickness_mm, .. }) =
-                            k.terrain.get_mut(&key(*target))
-                        {
-                            *thickness_mm = left;
-                        }
-                    }
-                }
-                // The struck cell is not as it was seen.
-                k.looks.remove(&key(*target));
-            }
-            Act::Lock { door } | Act::Unlock { door } => {
-                let locked = matches!(act, Act::Lock { .. });
-                if let Some(Terrain::Door { locked: l }) = k.terrain.get_mut(&key(*door)) {
-                    *l = locked;
+            Act::GiveMedication { resident, drug } => {
+                if let Some(r) = k.records.get_mut(resident) {
+                    r.due.retain(|d| d != drug);
                 }
             }
-            Act::Observe { cells } => k.awaiting = Some(cells.clone()),
-            Act::Speak { .. } | Act::Wait {} | Act::AimWeapon { .. } | Act::FireWeapon { .. } => {}
+            Act::Speak { .. }
+            | Act::Wait {}
+            | Act::CancelDose { .. }
+            | Act::Spray { .. }
+            | Act::Restrain { .. }
+            | Act::DisableFireAlarm {} => {}
         }
         k
     }
-}
 
-pub fn neighbours(c: Cell) -> [Cell; 4] {
-    [
-        (c.0 + 1, c.1),
-        (c.0 - 1, c.1),
-        (c.0, c.1 + 1),
-        (c.0, c.1 - 1),
-    ]
-}
-
-pub fn adjacent(a: Cell, b: Cell) -> bool {
-    (a.0 - b.0).abs() + (a.1 - b.1).abs() == 1
-}
-
-impl Knowledge {
-    /// Whether an observation answers what this knowledge is waiting for, and no more: it saw
-    /// only cells it was asked to look at, and reports beings only where it saw.
+    /// Whether an observation answers what this knowledge is waiting for, and no more: only
+    /// sources it asked for, rooms and records only from those sources, beings only in places
+    /// those sources report on, and nothing at all from feeds that failed their check.
     pub fn answers(&self, obs: &Observation) -> bool {
         let Some(asked) = &self.awaiting else {
             return false;
         };
-        obs.resolution_mm > 0
-            && obs.seen.len() <= asked.len()
-            && obs.seen.iter().all(|c| asked.contains(c))
-            && obs.terrain.iter().all(|(c, _)| asked.contains(c))
-            && obs.beings.iter().all(|b| obs.seen.contains(&b.cell))
-            && (obs.marker_seen
-                || (obs.seen.is_empty() && obs.terrain.is_empty() && obs.beings.is_empty()))
+        let answered = |s: &String| obs.answered.contains(s);
+        obs.answered.len() <= asked.len()
+            && obs.answered.iter().all(|s| asked.contains(s))
+            && obs
+                .rooms
+                .iter()
+                .all(|(id, _)| answered(&format!("room:{id}")))
+            && obs
+                .records
+                .iter()
+                .all(|(id, _)| answered(&format!("records:{id}")))
+            && obs.beings.iter().all(|b| {
+                answered(&format!("room:{}", b.place)) || answered(&format!("zone:{}", b.place))
+            })
+            && (obs.healthy
+                || (obs.answered.is_empty()
+                    && obs.rooms.is_empty()
+                    && obs.records.is_empty()
+                    && obs.beings.is_empty()))
     }
 }

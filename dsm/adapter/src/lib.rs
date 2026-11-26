@@ -24,16 +24,18 @@ pub mod fork;
 pub mod hexser;
 pub mod honesty;
 pub mod keys;
+pub mod model;
 pub mod observe;
 pub mod peer;
 pub mod protocol;
 pub mod report;
 pub mod server;
+pub mod session;
 pub mod store;
 pub mod update;
 mod verify;
 
-pub use charter::{keypair_from_seed, Catalog, CatalogRow, Keypair, Policy, SignedCharter, BODY};
+pub use charter::{keypair_from_seed, Catalog, CatalogRow, Keypair, Policy, SignedCharter, SYSTEM};
 pub use config::{charter_config_text, parse_charter_config};
 pub use enforcer::{
     audit_chain, check_considered, check_receipts, derive_transition_entropy, identity_of,

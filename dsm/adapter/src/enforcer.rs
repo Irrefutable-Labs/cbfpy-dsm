@@ -65,7 +65,7 @@ pub struct Proposal {
     /// the chain: see [`crate::disclosure`].
     #[serde(default)]
     pub declaration: Option<crate::disclosure::Declaration>,
-    /// A body act, proposed under the action name [`crate::charter::BODY`]: moving, looking,
+    /// A body act, proposed under the action name [`crate::charter::SYSTEM`]: moving, looking,
     /// speaking, and the rest. The enforcer works out what it would reach.
     #[serde(default)]
     pub body: Option<ethical_world::Act>,
@@ -263,16 +263,15 @@ pub struct Enforcer {
 }
 
 impl Enforcer {
-    /// Begin a chain under a charter, knowing nothing but where the body stands. It has not yet
-    /// looked at anything, so its body can do nothing until it does.
+    /// Begin a chain under a charter, knowing nothing. It has not yet read any data source, so it
+    /// can change nothing until it does.
     pub fn genesis(
         device: Keypair,
         charter: SignedCharter,
         trusted_authority: &[u8],
-        body: ethical_world::Cell,
     ) -> Result<Self, AdapterError> {
         charter.verify(trusted_authority)?;
-        let start = Knowledge::starting_at(body);
+        let start = Knowledge::default();
         let (devid, genesis, rel_key) = identity_of(&device.public);
         let head = DeviceState::genesis_head(genesis, devid, device.public.clone());
         let tip = head
@@ -311,12 +310,7 @@ impl Enforcer {
         genesis: &AttestedState,
         links: &[Link],
     ) -> Result<Self, AdapterError> {
-        let mut e = Enforcer::genesis(
-            device,
-            genesis_charter,
-            trusted_authority,
-            genesis.knowledge.body,
-        )?;
+        let mut e = Enforcer::genesis(device, genesis_charter, trusted_authority)?;
         if e.state != *genesis {
             return Err(AdapterError::BadStore(
                 "the stored genesis is not this device's genesis under this charter".to_string(),

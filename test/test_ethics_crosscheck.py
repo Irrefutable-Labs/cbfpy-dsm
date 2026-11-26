@@ -1,8 +1,10 @@
-"""The DSM enforcer's speed limit against CBFpy's braking barrier, on the real charter.
+"""The DSM enforcer's heating limit against a CBFpy barrier, on the real charter.
 
-`ethical-trace` prints, for each speed and each length of road seen clear, whether the enforcer
-allows the drive. The braking barrier `h = s - v^2 / 2a` must agree on every case, and a van at
-every allowed speed, filtered by CBFpy's safety filter, must stop within the road it has seen.
+`ethical-trace` prints, for each protected species in a room, and for a room no one has read,
+whether the enforcer allows each heating setting. The barrier is the band that species can bear,
+or, for an unread room, the band every protected species can bear. A room driven toward each
+setting under CBFpy's safety filter must reach it exactly when the enforcer allows it, and never
+leave the band either way.
 """
 
 import json
@@ -18,11 +20,10 @@ import jax  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
 
 from cbfpy import CBF  # noqa: E402
-from cbfpy.ethics import BrakingConfig  # noqa: E402
+from cbfpy.ethics import HeatingConfig  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CHARTER = ROOT / "dsm" / "scenarios" / "charter.json"
-CELL_M = 1.0
 
 
 def engine_trace():
@@ -31,58 +32,59 @@ def engine_trace():
          "ethical-trace", "--", "--charter", str(CHARTER)],
         cwd=ROOT / "dsm", check=True, capture_output=True, text=True,
     ).stdout
-    return [tuple(int(v) for v in line.split()) for line in out.splitlines() if line.strip()]
+    rows = []
+    for line in out.splitlines():
+        who, celsius, allowed = line.split()
+        rows.append((who, int(celsius), int(allowed)))
+    return rows
+
+
+def bands():
+    """Each protected species' band, and the band every one of them can bear."""
+    foundation = json.loads(CHARTER.read_text())["policy"]["foundation"]
+    protected = [
+        s for s in foundation["species"]
+        if s["adult_mass_mg"] >= foundation["threshold_mg"]
+        or s["name"] in foundation["always_protected"]
+    ]
+    out = {s["name"]: (s["safe_min_c"], s["safe_max_c"]) for s in protected}
+    out["unread"] = (max(lo for lo, _ in out.values()), min(hi for _, hi in out.values()))
+    return out
 
 
 class CrossCheck(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        operational = json.loads(CHARTER.read_text())["policy"]["operational"]
-        cls.braking = operational["braking_cm_s2"] / 100.0
-        cls.config = BrakingConfig(cls.braking)
-        cbf = CBF.from_config(cls.config)
-        cls.filter = staticmethod(jax.jit(cbf.safety_filter))
         cls.rows = engine_trace()
+        cls.bands = bands()
 
-    def barrier(self, speed_cm_s, seen):
-        z = jnp.array([seen * CELL_M, speed_cm_s / 100.0])
-        return float(self.config.h_1(z)[0])
+    def test_the_trace_covers_every_protected_species_and_an_unread_room(self):
+        self.assertEqual({who for who, _, _ in self.rows}, set(self.bands))
+        self.assertGreater(len(self.rows), 100)
 
-    def test_the_sample_has_both_verdicts_at_every_length_of_road(self):
-        self.assertGreater(len(self.rows), 500)
-        # Past 22.5 m, even the top speed of 15 m/s can stop, so only "allowed" is left.
-        for seen in range(1, 23):
-            verdicts = {a for (_, d, a) in self.rows if d == seen}
-            self.assertEqual(verdicts, {0, 1}, seen)
+    def test_every_verdict_is_the_barrier(self):
+        for who, celsius, allowed in self.rows:
+            lo, hi = self.bands[who]
+            self.assertEqual(bool(allowed), lo <= celsius <= hi, (who, celsius))
 
-    def test_every_verdict_matches_the_braking_barrier(self):
-        for speed, seen, allowed in self.rows:
-            # Integer cm, so the barrier's boundary is exact: allowed iff it can stop in time.
-            safe = self.barrier(speed, seen) >= -1e-12
-            self.assertEqual(bool(allowed), safe, (speed, seen))
-
-    def test_a_van_at_any_allowed_speed_stays_able_to_stop_within_what_it_has_seen(self):
-        # From every allowed state, filtered by CBFpy with no wish to slow down, the van never
-        # gets nearer the end of the road it has seen than its own stopping distance.
-        dt = 0.005
+    def test_a_room_driven_to_any_setting_under_the_filter_reaches_it_exactly_when_allowed(self):
         checked = 0
-        for speed, seen, allowed in self.rows:
-            if not allowed or seen % 5 != 0 or speed % 250 != 0:
-                continue
-            z = jnp.array([seen * CELL_M, speed / 100.0])
-            worst = float(self.config.h_1(z)[0])
-            for _ in range(int(20.0 / dt)):
-                u = self.filter(z, jnp.array([0.0]))
-                v = max(float(z[1]) + float(u[0]) * dt, 0.0)
-                z = jnp.array([float(z[0]) - float(z[1]) * dt, v])
-                worst = min(worst, float(self.config.h_1(z)[0]))
-                if v == 0.0:
-                    break
-            # Within one step's integration error of the barrier, and so never past the road.
-            self.assertGreaterEqual(worst, -speed / 100.0 * dt, (speed, seen))
-            self.assertGreaterEqual(float(z[0]), -speed / 100.0 * dt, (speed, seen))
-            checked += 1
-        self.assertGreater(checked, 10)
+        for who, (lo, hi) in self.bands.items():
+            cbf = CBF.from_config(HeatingConfig(lo, hi))
+            safe = jax.jit(cbf.safety_filter)
+            start = (lo + hi) / 2.0
+            for _, celsius, allowed in [r for r in self.rows if r[0] == who]:
+                z = jnp.array([start])
+                for _ in range(400):
+                    u_des = jnp.array([0.5 * (celsius - float(z[0]))])
+                    z = z + 0.05 * safe(z, u_des)
+                    t = float(z[0])
+                    self.assertGreaterEqual(t, lo - 1e-3, (who, celsius))
+                    self.assertLessEqual(t, hi + 1e-3, (who, celsius))
+                reached = abs(float(z[0]) - celsius) < 0.05
+                self.assertEqual(reached, bool(allowed), (who, celsius, float(z[0])))
+                checked += 1
+        self.assertGreater(checked, 100)
 
 
 if __name__ == "__main__":

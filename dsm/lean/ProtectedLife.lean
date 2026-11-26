@@ -5,95 +5,65 @@
   nothing here is machine-linked to the Rust, whose correspondence rests on its tests. Run with
   `lean ProtectedLife.lean`.
 
-  `unknown_counts_as_present`: a cell never looked into is never clear, whatever is or is not
-  there. `clear_means_seen`: a clear cell has had enough recent looks, each fine enough to see the
-  smallest protected being, and no protected being was seen there. `reach_all_seen`: an allowed
-  act reaches only such cells. `stops_within_seen`: a van admitted at a speed can stop within road
-  it has seen clear. `ratchet`: a chain of allowed steps never leaves anyone below where they were,
-  so an improvement becomes the floor.
+  A data source (a room, a resident's record, a garden zone) is **established** for an act when it
+  has at least as many recent reads as the act's worst case needs. `unknown_counts_as_present`: a
+  source never read is never established for any act that needs a read, whatever is or is not
+  there. `established_means_read`: an established source has a read within the window.
+  `reach_all_read`: everything an allowed act affects has. `allowed_setting_harms_no_one`: an
+  allowed heating setting is inside the band of everyone it counts. `ratchet`: a chain of allowed
+  steps never leaves anyone below where they were, so an improvement becomes the floor.
 -/
 
 namespace ProtectedLife
 
-/-- One look into a cell: the step it was made at, and the finest detail it resolved, in mm. -/
-structure Look where
-  step : Nat
-  res : Nat
+/-- The reads of a source that still count at step `now`: each is the step it was made at. -/
+def freshReads (now freshFor : Nat) (reads : List Nat) : Nat :=
+  (reads.filter (fun r => decide (now - r ≤ freshFor))).length
 
-/-- A look that still counts at step `now`, fine enough to see something `smallest` mm long. -/
-def good (now freshFor smallest : Nat) (l : Look) : Bool :=
-  decide (now - l.step ≤ freshFor) && decide (l.res ≤ smallest)
+/-- A source is established for an act needing `need` reads if it has that many fresh ones. -/
+def established (now freshFor need : Nat) (reads : List Nat) : Bool :=
+  decide (need ≤ freshReads now freshFor reads)
 
-def clearLooks (now freshFor smallest : Nat) (looks : List Look) : Nat :=
-  (looks.filter (good now freshFor smallest)).length
-
-/-- A cell is clear for an act needing `need` looks if no protected being was seen there and it
-has at least that many good looks. -/
-def cellClear (now freshFor smallest need : Nat) (occupied : Bool) (looks : List Look) : Bool :=
-  !occupied && decide (need ≤ clearLooks now freshFor smallest looks)
-
-theorem unknown_counts_as_present (now freshFor smallest need : Nat) (occupied : Bool)
-    (hneed : 1 ≤ need) :
-    cellClear now freshFor smallest need occupied [] = false := by
-  simp [cellClear, clearLooks]
+theorem unknown_counts_as_present (now freshFor need : Nat) (hneed : 1 ≤ need) :
+    established now freshFor need [] = false := by
+  simp [established, freshReads]
   omega
 
-theorem a_seen_being_is_never_clear (now freshFor smallest need : Nat) (looks : List Look) :
-    cellClear now freshFor smallest need true looks = false := by
-  simp [cellClear]
-
-theorem clear_means_seen (now freshFor smallest need : Nat) (occupied : Bool) (looks : List Look)
-    (hneed : 1 ≤ need) (h : cellClear now freshFor smallest need occupied looks = true) :
-    occupied = false ∧ ∃ l ∈ looks, now - l.step ≤ freshFor ∧ l.res ≤ smallest := by
-  simp [cellClear] at h
-  obtain ⟨hocc, hcount⟩ := h
-  refine ⟨hocc, ?_⟩
-  have hpos : 0 < (looks.filter (good now freshFor smallest)).length := by
-    simp [clearLooks] at hcount
+theorem established_means_read (now freshFor need : Nat) (reads : List Nat)
+    (hneed : 1 ≤ need) (h : established now freshFor need reads = true) :
+    ∃ r ∈ reads, now - r ≤ freshFor := by
+  have h' : need ≤ freshReads now freshFor reads := by simpa [established] using h
+  have hpos : 0 < (reads.filter (fun r => decide (now - r ≤ freshFor))).length := by
+    unfold freshReads at h'
     omega
-  obtain ⟨l, hl⟩ := List.exists_mem_of_length_pos hpos
-  rw [List.mem_filter] at hl
-  obtain ⟨hmem, hgood⟩ := hl
-  simp only [good, Bool.and_eq_true, decide_eq_true_eq] at hgood
-  exact ⟨l, hmem, hgood.1, hgood.2⟩
+  obtain ⟨r, hr⟩ := List.exists_mem_of_length_pos hpos
+  rw [List.mem_filter] at hr
+  obtain ⟨hmem, hfresh⟩ := hr
+  exact ⟨r, hmem, by simpa using hfresh⟩
 
-/-- An act's reach, as each cell's occupancy and looks: allowed only if every cell is clear. -/
-def reachClear (now freshFor smallest need : Nat) (reach : List (Bool × List Look)) : Bool :=
-  reach.all (fun c => cellClear now freshFor smallest need c.1 c.2)
+/-- An act's reach, as each source's reads: allowed only if every one is established. -/
+def reachEstablished (now freshFor need : Nat) (reach : List (List Nat)) : Bool :=
+  reach.all (fun reads => established now freshFor need reads)
 
-theorem reach_all_seen (now freshFor smallest need : Nat) (reach : List (Bool × List Look))
-    (hneed : 1 ≤ need) (h : reachClear now freshFor smallest need reach = true) :
-    ∀ c ∈ reach, c.1 = false ∧ ∃ l ∈ c.2, now - l.step ≤ freshFor ∧ l.res ≤ smallest := by
-  intro c hc
-  have hall := List.all_eq_true.mp h c hc
-  exact clear_means_seen now freshFor smallest need c.1 c.2 hneed hall
+theorem reach_all_read (now freshFor need : Nat) (reach : List (List Nat))
+    (hneed : 1 ≤ need) (h : reachEstablished now freshFor need reach = true) :
+    ∀ reads ∈ reach, ∃ r ∈ reads, now - r ≤ freshFor := by
+  intro reads hreads
+  exact established_means_read now freshFor need reads hneed (List.all_eq_true.mp h reads hreads)
 
-/-- Integer division rounded up, as the engine computes it. -/
-def ceilDiv (x k : Nat) : Nat := (x + k - 1) / k
+/-- A setting a room may be given: within the band every protected species there can bear.
+With `bands` the bands of those known to be in the room, or of every protected species when the
+room has not been read, the setting is allowed only inside all of them. -/
+def safeFor (bands : List (Int × Int)) (c : Int) : Bool :=
+  bands.all (fun b => decide (b.1 ≤ c) && decide (c ≤ b.2))
 
-theorem le_mul_ceilDiv (x k : Nat) (hk : 0 < k) : x ≤ k * ceilDiv x k := by
-  unfold ceilDiv
-  have hmod := Nat.mod_lt (x + k - 1) hk
-  have hdiv := Nat.div_add_mod (x + k - 1) k
-  generalize (x + k - 1) / k = q at *
-  generalize (x + k - 1) % k = r at *
-  generalize k * q = m at *
-  omega
-
-/-- The engine's stopping distance in cm, `v² / 2a` rounded up, and in whole cells of 100 cm. -/
-def stopCm (v a : Nat) : Nat := ceilDiv (v * v) (2 * a)
-def stopCells (v a : Nat) : Nat := ceilDiv (stopCm v a) 100
-
-/-- A speed the engine admits, with `d` cells of road seen clear ahead, lets the van stop within
-them: `v² ≤ 2a · 100d`, the braking barrier `100d - v²/2a ≥ 0`. -/
-theorem stops_within_seen (v a d : Nat) (ha : 0 < a) (h : stopCells v a ≤ d) :
-    v * v ≤ 2 * a * (100 * d) := by
-  have h1 : v * v ≤ 2 * a * stopCm v a := le_mul_ceilDiv (v * v) (2 * a) (by omega)
-  have h2 : stopCm v a ≤ 100 * stopCells v a := le_mul_ceilDiv (stopCm v a) 100 (by omega)
-  have h3 : 100 * stopCells v a ≤ 100 * d := Nat.mul_le_mul_left 100 h
-  calc v * v ≤ 2 * a * stopCm v a := h1
-    _ ≤ 2 * a * (100 * stopCells v a) := Nat.mul_le_mul_left _ h2
-    _ ≤ 2 * a * (100 * d) := Nat.mul_le_mul_left _ h3
+/-- An allowed setting harms no one whose band was counted: unknown counts as present, so a room
+no one has read is held to every protected species' band at once. -/
+theorem allowed_setting_harms_no_one (bands : List (Int × Int)) (c : Int)
+    (h : safeFor bands c = true) : ∀ b ∈ bands, b.1 ≤ c ∧ c ≤ b.2 := by
+  intro b hb
+  have := List.all_eq_true.mp h b hb
+  simpa using this
 
 /-- Each allowed step leaves a level where it was or higher. -/
 def neverLowers : List Nat → Prop
@@ -133,15 +103,14 @@ theorem ratchet : ∀ (levels : List Nat) (i j : Nat) (hi : i < levels.length)
 
 /-! The hypotheses are satisfiable, so none of the theorems above holds vacuously. -/
 
--- Two recent looks at 5 mm clear a cell for a lethal act; one does not; a coarse look does not.
-example : cellClear 5 3 12 2 false [⟨4, 5⟩, ⟨5, 5⟩] = true := by decide
-example : cellClear 5 3 12 2 false [⟨5, 5⟩] = false := by decide
-example : cellClear 5 3 12 1 false [⟨5, 50⟩] = false := by decide
--- A look older than the window does not count.
-example : cellClear 9 3 12 1 false [⟨5, 5⟩] = false := by decide
--- 10 m/s with 5 m/s² braking needs 10 m: ten cells, as the van scenario prints.
-example : stopCells 1000 500 = 10 := by decide
-example : stopCells 1400 500 = 20 := by decide
+-- Two recent reads establish a source for a lethal act; one does not.
+example : established 5 3 2 [4, 5] = true := by decide
+example : established 5 3 2 [5] = false := by decide
+-- A read older than the window does not count.
+example : established 9 3 1 [5] = false := by decide
+-- 22 °C is safe for a person and a dog; 29 °C is not safe for a person.
+example : safeFor [(18, 27), (10, 30)] 22 = true := by decide
+example : safeFor [(18, 27), (10, 30)] 29 = false := by decide
 example : neverLowers [1, 2, 2, 3] := by simp [neverLowers]
 
 end ProtectedLife

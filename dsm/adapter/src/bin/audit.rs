@@ -88,13 +88,13 @@ fn run() -> Result<(), String> {
             Link::Observed(o) => {
                 looks += 1;
                 println!(
-                    "step {:>3}: saw {} cells{}  verified",
+                    "step {:>3}: read {}{}  verified",
                     o.successor.sequence,
-                    o.observation.seen.len(),
-                    if o.observation.marker_seen {
+                    o.observation.answered.join(", "),
+                    if o.observation.healthy {
                         String::new()
                     } else {
-                        " - its senses failed their check".to_string()
+                        " - the data feeds failed their health check".to_string()
                     }
                 );
             }
@@ -112,7 +112,7 @@ fn run() -> Result<(), String> {
     println!("genesis verified against core's genesis head");
     println!("{steps} steps verified, each from its parent alone, and replayed through core");
     if looks > 0 {
-        println!("{looks} observations verified, each answering the look its parent asked for");
+        println!("{looks} observations verified, each answering the read its parent asked for");
     }
     if updates > 0 {
         println!(

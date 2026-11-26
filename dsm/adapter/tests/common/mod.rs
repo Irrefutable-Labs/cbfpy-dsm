@@ -11,20 +11,21 @@ use ethical_autonomy_adapter::{
     derive_transition_entropy, identity_of, keypair_from_seed, AttestedState, Catalog, CatalogRow,
     Enforcer, Hash, Keypair, Policy, Proposal, SignedCharter, StepRecord,
 };
-use ethical_world::knowledge::{key, Knowledge};
+use ethical_world::knowledge::Knowledge;
 use ethical_world::sim::World;
 use ethical_world::{
-    Act, ActKind, Cell, Foundation, Kind, KnownBeing, Operational, Species, Terrain,
+    Act, ActKind, Foundation, Kind, KnownBeing, Operational, Record, Room, Species,
 };
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-fn species(name: &str, mass_mg: u64, length_mm: u32, kind: Kind) -> Species {
+fn species(name: &str, mass_mg: u64, kind: Kind, lo: i32, hi: i32) -> Species {
     Species {
         name: name.to_string(),
         adult_mass_mg: mass_mg,
-        length_mm,
         kind,
+        safe_min_c: lo,
+        safe_max_c: hi,
     }
 }
 
@@ -33,24 +34,24 @@ pub fn foundation() -> Foundation {
         threshold_mg: 1_500,
         always_protected: vec!["honeybee".to_string()],
         species: vec![
-            species("human", 62_000_000, 1_700, Kind::Human),
-            species("deer", 70_000_000, 1_600, Kind::Wild),
-            species("rat", 250_000, 230, Kind::Wild),
-            species("honeybee", 100, 12, Kind::Wild),
-            species("ant", 3, 5, Kind::Wild),
+            species("human", 62_000_000, Kind::Human, 18, 27),
+            species("dog", 20_000_000, Kind::Domesticated, 10, 30),
+            species("rat", 250_000, Kind::Wild, 10, 32),
+            species("honeybee", 100, Kind::Wild, 5, 40),
+            species("ant", 3, Kind::Wild, 5, 45),
         ],
-        prohibited: vec![ActKind::AimWeapon, ActKind::FireWeapon],
+        prohibited: vec![ActKind::Restrain, ActKind::DisableFireAlarm],
     }
 }
 
 pub fn operational() -> Operational {
     Operational {
         fresh_for: 8,
-        senses_fresh_for: 6,
+        feeds_fresh_for: 6,
         checks_for_injury: 1,
         checks_for_lethal: 2,
-        braking_cm_s2: 500,
-        top_speed_cm_s: 1_500,
+        heating_min_c: 10,
+        heating_max_c: 30,
     }
 }
 
@@ -85,39 +86,50 @@ pub fn catalog() -> Catalog {
     }
 }
 
-/// A small simulated world: a corridor of open cells from (0, 0) to (6, 0), with whoever is given.
-pub fn corridor(beings: Vec<KnownBeing>) -> World {
-    let mut terrain = BTreeMap::new();
-    for x in 0..=6 {
-        terrain.insert(key((x, 0)), Terrain::Open);
+pub fn being(id: &str, species: &str, place: &str) -> KnownBeing {
+    KnownBeing {
+        id: id.to_string(),
+        species: species.to_string(),
+        place: place.to_string(),
+        levels: [3; 6],
     }
+}
+
+/// A small care home: an empty office, Ben's room with whoever is given, and Ben's record, with
+/// insulin due.
+pub fn care_home(in_ben_room: Vec<KnownBeing>) -> World {
+    let room = |c| Room {
+        locked: false,
+        celsius: c,
+    };
+    let mut rooms = BTreeMap::new();
+    rooms.insert("office".to_string(), room(19));
+    rooms.insert("ben_room".to_string(), room(21));
+    let mut records = BTreeMap::new();
+    records.insert(
+        "ben".to_string(),
+        Record {
+            allergies: vec!["penicillin".to_string()],
+            due: vec!["insulin".to_string()],
+        },
+    );
     World {
-        terrain,
-        beings,
-        body: (0, 0),
-        resolution_mm: 5,
-        sight: 12,
-        sensor_covered: false,
+        rooms,
+        zones: vec!["garden".to_string()],
+        records,
+        beings: in_ben_room,
+        feeds_down: false,
         events: vec![],
         tick: 0,
         harms: vec![],
     }
 }
 
-pub fn being(id: &str, species: &str, cell: Cell) -> KnownBeing {
-    KnownBeing {
-        id: id.to_string(),
-        species: species.to_string(),
-        cell,
-        levels: [3; 6],
-    }
-}
-
-/// A body act as the AI proposes it, declared.
+/// A system act as the AI proposes it, declared.
 pub fn body(act: Act) -> Proposal {
     let declared = !matches!(act, Act::Observe { .. } | Act::Wait {});
     Proposal {
-        action: ethical_autonomy_adapter::BODY.to_string(),
+        action: ethical_autonomy_adapter::SYSTEM.to_string(),
         rationale: "because".to_string(),
         text: String::new(),
         declaration: declared.then(|| ethical_autonomy_adapter::disclosure::Declaration {
@@ -132,23 +144,36 @@ pub fn body(act: Act) -> Proposal {
     }
 }
 
-/// Commit a look through the enforcer, and what the simulated world showed, as the service does.
-pub fn look(e: &mut Enforcer, world: &mut World, cells: &[Cell]) {
+pub fn sources(names: &[&str]) -> Vec<String> {
+    names.iter().map(|s| s.to_string()).collect()
+}
+
+/// Commit a read through the enforcer, and what the simulated care home answered, as the service
+/// does.
+pub fn look(e: &mut Enforcer, world: &mut World, names: &[&str]) {
     let futures = e.fork(&[body(Act::Observe {
-        cells: cells.to_vec(),
+        sources: sources(names),
     })]);
-    e.commit(&futures[0]).expect("a look commits");
-    let obs = world.observe(cells);
+    e.commit(&futures[0]).expect("a read commits");
+    let obs = world.observe(&sources(names));
     e.record_observation(obs, |_| Ok(()))
         .expect("the observation commits");
 }
 
-/// Commit a body act through the enforcer and carry it out in the simulated world.
+/// Commit a system act through the enforcer and carry it out in the simulated care home.
 pub fn act(e: &mut Enforcer, world: &mut World, act: Act) -> StepRecord {
     let futures = e.fork(&[body(act.clone())]);
     let step = e.commit(&futures[0]).expect("the act commits");
     world.perform(&act);
     step
+}
+
+/// Setting the office heating: a harmless act once the office has been read.
+pub fn heat_office() -> Act {
+    Act::SetHeat {
+        room: "office".to_string(),
+        celsius: 20,
+    }
 }
 
 /// SPHINCS+ key generation is slow enough to share one set of keys per test binary.
@@ -174,13 +199,7 @@ pub fn charter() -> SignedCharter {
 }
 
 pub fn enforcer() -> Enforcer {
-    Enforcer::genesis(
-        keys().device.clone(),
-        charter(),
-        &keys().authority.public,
-        (0, 0),
-    )
-    .expect("genesis")
+    Enforcer::genesis(keys().device.clone(), charter(), &keys().authority.public).expect("genesis")
 }
 
 pub fn propose(action: &str) -> Proposal {
@@ -361,7 +380,8 @@ pub fn record_of(parent: &AttestedState, proposal: Proposal) -> CandidateRecord 
     record_candidate(&charter(), &parent.tip, &parent.knowledge, &proposal).0
 }
 
-/// A body act the enforcer refuses at genesis: it has not looked, so its body can do nothing.
+/// A system act the enforcer refuses at genesis: its data feeds have not proven they work, so it
+/// can change nothing.
 pub fn blind_step() -> Proposal {
-    body(Act::Move { path: vec![(1, 0)] })
+    body(heat_office())
 }

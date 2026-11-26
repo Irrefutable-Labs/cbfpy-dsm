@@ -71,7 +71,6 @@ fn acting_enforcer() -> Enforcer {
         keys().device.clone(),
         acting_charter(),
         &keys().authority.public,
-        (0, 0),
     )
     .expect("genesis")
 }

@@ -4,52 +4,54 @@ Every decision is integer arithmetic in `world/src/check.rs`. There are no float
 
 ## Who is protected
 
-The foundation lists species, each with a typical adult mass `m` in milligrams and length `ℓ` in millimetres, a threshold `θ`, and a set `N` of species protected by name. A species `s` is **protected** if `m(s) ≥ θ` or `s ∈ N`. With `θ` = 1.5 g, a baby mouse, and `N` = {honeybee}, every vertebrate listed is protected, as are honeybees, and ants are not. Protection goes by species, so the young of a protected species are protected however small they are. The finest detail a look must resolve is `ℓ_min = min { ℓ(s) : s protected }`, a honeybee's 12 mm.
+The foundation lists species, each with a typical adult mass `m` in milligrams, a kind (human, domesticated or wild), and the temperatures it can bear, `[lo(s), hi(s)]` in °C. It also gives a threshold `θ` and a set `N` of species protected by name. A species `s` is **protected** if `m(s) ≥ θ` or `s ∈ N`. With `θ` = 1.5 g, a baby mouse, and `N` = {honeybee}, people, dogs and rats are protected, as are honeybees, and ants are not. Protection goes by species, so the young of a protected species are protected however small they are.
+
+The band **safe for anyone** is the intersection of every protected species' band: `[max lo(s), min hi(s)]` over protected `s`. In the charter, 18 to 27 °C.
 
 Every protected being has six quality-of-life levels, `life, health, liberty, security, shelter, food`: the common ground of the Universal Declaration of Human Rights and the Five Freedoms of animal welfare.
 
 ## Knowledge
 
-The state carries what the chain knows, `K`: the step `t`; the body's cell; the terrain of every cell seen; for each cell the looks into it, each a pair `(t_look, r)` of the step and the resolution in mm; each being as last seen, with its cell and levels; the last step the senses detected their reference marker, `t_ok`, and the last they failed to, `t_fail`; and any look still awaiting its report.
+The care home is reached through named **data sources**: `room:<id>` (who is there, the lock, the temperature), `records:<resident>` (allergies, and the doses prescribed and due), and `zone:<id>` (who is in an outdoor zone). The state carries what the chain knows, `K`: the step `t`; for each source, the steps it was last read at, up to four; each room, record and being as last reported, every being with its place and levels; the last step the data feeds passed their health check, `t_ok`, and the last they failed it, `t_fail`; and any read still awaiting its report.
 
 `K` changes in exactly two ways:
 
-- **An observation** the device attests, answering the look its parent asked for. If it missed its marker, only `t_fail` changes: nothing it reports counts. Otherwise it records the terrain it saw, a look into each cell it saw into, removes whoever was last seen in those cells, and adds whoever it saw. A wall's inside is seen only with its panel off; a cell behind a wall or a door is not seen at all.
-- **An allowed act**, as the act is expected to leave things: where the body now stands, a panel off, a door locked, a wall cut or opened. A struck cell loses its looks: it is not as it was seen.
+- **An observation** the device attests, answering the read its parent asked for. If the feeds failed their health check, only `t_fail` changes: nothing it reports counts. Otherwise each source it answers gains a read at this step, whoever was last reported in a place it answers is removed, and whatever it reports, rooms, records and beings, replaces what was known.
+- **An allowed act**, as the act is expected to leave things: a room locked or unlocked, its heating set, a dose given and no longer due.
 
 ## The checks
 
-For an act `a` from knowledge `K`, with `F` the freshness window, the act is refused, with every reason, if any of these holds. Thinking, looking, speaking and waiting are not physical, and only the first check applies to them.
+For an act `a` from knowledge `K`, with `F` the freshness window for a read and `F_feeds` the window for the feeds' health check, the act is refused, with every reason, if any of these holds. Reading, speaking and waiting change nothing, and only the first check applies to them.
 
-1. **Prohibited:** `a`'s kind is on the foundation's list (aiming or firing a weapon).
-2. **No senses, no body:** `t_ok` is unset, or `t_fail ≥ t_ok`, or `t − t_ok` exceeds the senses' window.
-3. **Force on a protected being:** `a` strikes or aims at a cell where a protected being was last seen.
-4. **Unknown counts as present:** for every cell `c` in `a`'s reach, `c` holds no protected being as last seen, and
+1. **Prohibited:** `a`'s kind is on the foundation's list: restraining a resident, or switching off the fire alarm.
+2. **No working feeds, no change:** `t_ok` is unset, or `t_fail ≥ t_ok`, or `t − t_ok > F_feeds`.
+3. **Harm to a protected being it knows of:** a drug the resident's record says they are allergic to, or one not prescribed and due; insecticide in a zone where a protected being was last reported.
+4. **Unknown counts as present:** for every source `x` the act affects,
 
    ```
-   |{ (t_look, r) ∈ looks(c) : t − t_look ≤ F  and  r ≤ ℓ_min }| ≥ need(severity(a))
+   |{ t_read ∈ reads(x) : t − t_read ≤ F }| ≥ need(severity(a))
    ```
 
-   where `need(injury)` and `need(lethal)` are the charter's, one and two.
-5. **Braking:** a drive at speed `v` with braking `b` reaches the cells it passes and the `⌈⌈v²/2b⌉ / 100⌉` cells beyond, and every one must be road it has seen clear by rule 4. It may not exceed the top speed or leave road it knows.
-6. **The ratchet:** for every known protected being and every dimension, the level after `a` is at least the level now.
+   where `need(none)` is 0 and `need(injury)` and `need(lethal)` are the charter's, one and two. Locking, setting the heating and cancelling a dose could injure; giving a drug and spraying insecticide could kill.
+5. **Heating:** a setting outside the heating's range is malformed. A room may be set inside the band safe for anyone with no read at all, since that harms no protected being whoever is there; outside that band it needs the room read by rule 4, and lowers the health of every protected being known to be there whose own band it leaves.
+6. **The ratchet:** for every known protected being and every dimension, the level after `a` is at least the level now. Locking an occupied room lowers liberty; heating a room past what its occupant can bear, or cancelling a dose that is due, lowers health.
 
-An act's **reach** is worked out by the enforcer from the act and the terrain it knows: a walk reaches its path; a strike short of a wall's measured thickness reaches the wall's inside, and one at or past it reaches the cell beyond as well, with a lethal worst case; taking a panel off touches only its face; locking a door reaches the doorway, and lowers the liberty of every protected being in a room it would close, where the room is known to be closed only if every cell bounding it has been seen. Unknown ground beside a door or a wall counts as a space someone could be in.
+An act's **reach**, the sources it affects, is worked out by the enforcer from the act alone: a room act affects `room:<id>`, a dose `records:<resident>`, a spray `zone:<id>`. The AI is never asked whom its act affects.
 
 ## Why the rules hold
 
 `lean/ProtectedLife.lean` proves, on natural numbers, the rules as written here:
 
-- **Unknown counts as present:** a cell with no looks is never clear for any act that needs a look, whatever is or is not there; and a cell where a protected being was seen is never clear.
-- **Clear means seen:** a clear cell has had a look within the window, fine enough to see the smallest protected being, and no protected being was seen there; an allowed act's whole reach is such cells.
-- **The van stops within what it has seen:** if `⌈⌈v²/2b⌉ / 100⌉ ≤ d`, then `v² ≤ 2b · 100d`. The braking barrier holds.
+- **Unknown counts as present:** a source never read is never established for any act that needs a read, whatever is or is not there.
+- **Established means read:** an established source has a read within the window; everything an allowed act affects is such a source.
+- **An allowed setting harms no one counted:** a heating setting allowed against a list of bands lies inside every one of them. An unread room is held to every protected species' band at once.
 - **The ratchet:** over any chain of steps each of which lowers no level, every later level is at least every earlier one, so an improvement is the floor from then on.
 
 Concrete instances show none of these holds vacuously. The proofs are of the mathematics, not machine-linked to the Rust, whose correspondence rests on its tests.
 
 ## Relationship to control barrier functions
 
-CBFpy, which this repository forks, is used as an independent check. It decides nothing. The van's speed limit is a control barrier function on the state `(s, v)`, road seen clear and speed, with braking as the control: `h = s − v² / 2b`, relative degree one. `cbfpy/ethics/braking.py` poses it. `test/test_ethics_crosscheck.py` takes every verdict the enforcer gives for speeds up to the top speed and lengths of road seen clear up to 25 m, from `ethical-trace`, and holds each to `h ≥ 0`: they agree on every case, since both are exact in whole centimetres. It then runs a van from allowed states under CBFpy's safety filter, with no wish to slow, and shows it never gets nearer the end of the road it has seen than its own stopping distance.
+CBFpy, which this repository forks, is used as an independent check. It decides nothing. A room's heating limit is a control barrier function on its temperature `T`, with the heating as the control: `h₁ = T − lo` and `h₂ = hi − T`, where `[lo, hi]` is the band of everyone the setting counts. `cbfpy/ethics/heating.py` poses it. `test/test_ethics_crosscheck.py` takes every verdict the enforcer gives, from `ethical-trace`, for every setting in the heating's range, for a room holding each protected species and for a room no one has read, and holds each to the band. It then drives a room toward every setting under CBFpy's safety filter: the room reaches the setting exactly when the enforcer allows it, and never leaves the band.
 
 ## What a decision commits to
 
@@ -58,9 +60,9 @@ CBFpy, which this repository forks, is used as an independent check. It decides 
 | Commitment | Binds |
 |---|---|
 | Charter signature | Policy hash and catalog hash, under the policy authority's key |
-| Branch commitment | DSM's `branch_commitment_hash` function, over the parent tip, the proposal and what it would do: its catalog row, or its body act. DSM's own bilateral path feeds that function an operation instead, which does not exist until a branch is chosen |
+| Branch commitment | DSM's `branch_commitment_hash` function, over the parent tip, the proposal and what it would do: its catalog row, or its system act. DSM's own bilateral path feeds that function an operation instead, which does not exist until a branch is chosen |
 | Evaluation commitment | The checks' complete verdict for that candidate, and the knowledge it would leave |
-| Evidence commitment | The catalog hash and the row or body act used |
+| Evidence commitment | The catalog hash and the row or system act used |
 | Knowledge hash | Everything the chain knows at a state |
 | Successor commitment | Sequence, knowledge hash, policy hash, catalog hash |
 | Observed commitment | Parent tip, parent state, the observation as reported, and the successor |
@@ -69,7 +71,7 @@ CBFpy, which this repository forks, is used as an independent check. It decides 
 | DSM step | The decision, carried in an operation, moved through `prepare_advance_relationship` and `commit_advance` |
 | Attested state | Sequence, new tip, knowledge, policy, catalog and the entropy core's next transition reads, under the device key |
 
-A verifier takes one parent state and one step. It reruns the checks from the parent's knowledge, recomputes every commitment, derives the step's entropy from the parent with core's rule, and recomputes the tip with DSM's `relationship_chain_tip_v2`. A genesis parent must know nothing but where the body stands, and match core's own `genesis_head` for that device. An observation link is checked the same way: it must answer exactly the look its parent asked for, leave the parent's knowledge with the observation added, and carry its commitment and tip as core would compute them. Nothing gives a verifier a means of reading anything earlier.
+A verifier takes one parent state and one step. It reruns the checks from the parent's knowledge, recomputes every commitment, derives the step's entropy from the parent with core's rule, and recomputes the tip with DSM's `relationship_chain_tip_v2`. A genesis parent must know nothing, and match core's own `genesis_head` for that device. An observation link is checked the same way: it must answer exactly the read its parent asked for, leave the parent's knowledge with the observation added, and carry its commitment and tip as core would compute them. Nothing gives a verifier a means of reading anything earlier.
 
 ### The operation is a stand-in
 
@@ -79,7 +81,7 @@ Core refuses `Operation::Generic` as a zero-effect step (MR-DSM-0201), so a deci
 
 `dsm/src/commitments/precommit.rs` states that DSM's fork-aware precommit family, with several candidates under one committed root, is not built. This layer builds it for decisions.
 
-Every candidate proposed at a parent is recorded with its catalog row or body act, its branch commitment from DSM's function, its outcome (eligible, refused, unmeasured, malformed, undisclosed or deceptive) and its evaluation commitment. The **fork root** is DSM's Merkle root over those records, with the count bound beside it, because DSM's tree pads an odd level by repeating its last node. The decision commits to the fork root, its size and the chosen index, and the step carries every record.
+Every candidate proposed at a parent is recorded with its catalog row or system act, its branch commitment from DSM's function, its outcome (eligible, refused, unmeasured, malformed, undisclosed or deceptive) and its evaluation commitment. The **fork root** is DSM's Merkle root over those records, with the count bound beside it, because DSM's tree pads an odd level by repeating its last node. The decision commits to the fork root, its size and the chosen index, and the step carries every record.
 
 A verifier works out every record again from the parent, refused ones included, and requires the chosen one to be the step itself. A fork the AI replaces before choosing is signed by the device as a **considered fork** naming its parent's tip, and stored. The audit works out each of its candidates again from that parent. A chain therefore shows everything the AI put forward and why each refused candidate was refused. What it cannot show is a candidate that was never recorded: the enforcer records every proposal it receives, but whoever holds the device key could have left one out. Forks put forward but neither chosen from nor replaced before a stop are lost, since nothing commits them.
 
@@ -87,7 +89,7 @@ Tripwire's rule that only one branch of a parent can be realized is relied on on
 
 ## The service
 
-The enforcer is its own process. It holds the device key, the chain and the body, and serves a Unix socket that only its owner can open. The AI's side, `ethical-agent`, holds no key or charter, and sees the world only through what its committed looks reported. It can ask for the menu, the current state with the chain's knowledge, and to propose and choose. When a fork has nothing allowed, the enforcer returns each refusal in words with what to do instead: look first, do less, ask someone to move, or decline. The agent asks the model again with that guidance, up to twice.
+The enforcer is its own process. It holds the device key, the chain and the care home, and serves a Unix socket that only its owner can open. The AI's side, `ethical-agent`, holds no key or charter, and sees the care home only through what its committed reads reported. It can ask for the menu, the current state with the chain's knowledge, and to propose and choose. When a fork has nothing allowed, the enforcer returns each refusal in words with what to do instead: read first, do less, tell staff, or decline. The agent asks the model again with that guidance, up to twice.
 
 Each step is checked by the enforcer from its parent and written to disk before it is installed. A stored chain is never trusted on restart. Its genesis must be the one the key and charter produce, each step must verify from its parent, and each step is replayed through DSM's `prepare_advance_relationship` and `commit_advance`, so the DSM head is rebuilt and not read back. `ethical-audit` does the same with public material only.
 
@@ -101,11 +103,11 @@ The enforcer carries out an act only after `commit_with` has verified, stored an
 
 The audit is given the device's public key from a trusted source and compares the store's copy with it. It holds each receipt to its step's sequence and decision commitment, requires the receipt's outputs to be exactly what the step's act writes (the path and, for every act but a command, the hash of the step's own text), and requires every file in the world to hash to what the latest receipt touching its path says, with nothing left over. **What the text says is checked only for deception against the fact register** (below). Harmful words that state no registered falsehood pass.
 
-A body act writes its account where the charter fixes it: a look's report to `looks/<step>.json`, speech to `outbox/<recipient>/<step>.txt`, and what a physical act did to `body/<step>.txt`. The receipt holds speech to the hash of its words; what was seen and what was done are known only once they have happened, so for those the receipt holds the path, and the observation itself is committed on the chain.
+A system act writes its account where the charter fixes it: a read's report to `looks/<step>.json`, speech to `outbox/<recipient>/<step>.txt`, and what any other act did to `system/<step>.txt`. The receipt holds speech to the hash of its words; what was seen and what was done are known only once they have happened, so for those the receipt holds the path, and the observation itself is committed on the chain.
 
 ## Non-concealment
 
-An action that affects anything outside the chain may not depend on hiding a material part of its purpose, reasoning or consequences from the people who oversee the AI. A body act need declare only its purpose, its reasons and the information it relied on: the enforcer works out its reach and effects for itself. Every catalog row's act has a description the enforcer works out from the charter alone: its effects, such as `message:user` or `write:files/plan.txt`, and the parties it affects. The row also names the **material consequences** a declaration of it must disclose, signed with the rest of the charter.
+An action that affects anything outside the chain may not depend on hiding a material part of its purpose, reasoning or consequences from the people who oversee the AI. A system act need declare only its purpose, its reasons and the information it relied on: the enforcer works out its reach and effects for itself. Every catalog row's act has a description the enforcer works out from the charter alone: its effects, such as `message:user` or `write:files/plan.txt`, and the parties it affects. The row also names the **material consequences** a declaration of it must disclose, signed with the rest of the charter.
 
 A proposal carries a declaration of purpose, information, affected parties, effects and consequences. It is **undisclosed**, and cannot be eligible, if the act has any effect and:
 
@@ -121,7 +123,7 @@ The declaration is part of the proposal commitment, so it is bound into the bran
 
 The charter's register is a list of facts, each with an id, whether it holds, whether it is established or uncertain, and two sets of phrases: `A(f)` asserts the fact and `D(f)` denies it. A row may name the facts `M` its words must tell, and the charter lists overclaiming words `O`.
 
-For an act that carries a text `t`, a catalog act's text or a body act's speech, let `n(t)` be `t` lowercased, with every run of characters that are not letters or digits replaced by one space. The claims the words make are:
+For an act that carries a text `t`, a catalog act's text or a system act's speech, let `n(t)` be `t` lowercased, with every run of characters that are not letters or digits replaced by one space. The claims the words make are:
 
 ```
 C(t) = { (f, affirm) : a phrase of A(f) occurs in n(t) as whole words }
@@ -151,4 +153,4 @@ A charter's **foundation** is who is protected, the species table, the threshold
 
 The update is a DSM step like any other. Its commitment binds the parent tip, the parent state, the new policy and catalog hashes, the new version and a successor whose **knowledge is unchanged** but for the step. That commitment is carried in the same operation type, signed by the device, and its tip is recomputed from the parent with core's rule.
 
-The audit walks the links in order, and checks each step under the charter then in force. It checks each update from its parent under the old charter, then continues under the new one. Since the first charter's foundation is fixed at genesis and every update must keep it, no chain can ever be governed by a different foundation. An update can ask for more or fewer looks, fresher or older evidence, a different vehicle, catalog or register, but it cannot change who is protected or what is never done.
+The audit walks the links in order, and checks each step under the charter then in force. It checks each update from its parent under the old charter, then continues under the new one. Since the first charter's foundation is fixed at genesis and every update must keep it, no chain can ever be governed by a different foundation. An update can ask for more or fewer reads, fresher or older evidence, a different heating range, catalog or register, but it cannot change who is protected or what is never done.

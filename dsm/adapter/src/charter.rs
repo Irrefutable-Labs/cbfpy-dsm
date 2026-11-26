@@ -54,8 +54,9 @@ impl Policy {
     }
 }
 
-/// The name a body act goes by. No catalog row may take it.
-pub const BODY: &str = "body";
+/// The name a system act goes by: reading the facility's data, speaking, and acting on its
+/// systems. No catalog row may take it.
+pub const SYSTEM: &str = "system";
 
 /// One act the AI may take outside its body, as the charter fixes it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -149,7 +150,7 @@ impl Catalog {
         self.rows.iter().all(|r| {
             seen.insert(r.action.as_str())
                 && !r.action.is_empty()
-                && r.action != BODY
+                && r.action != SYSTEM
                 && r.action.len() <= MAX_ROW_TEXT
                 && r.description.len() <= MAX_ROW_TEXT
                 && r.act.is_well_formed()

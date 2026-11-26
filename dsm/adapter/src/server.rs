@@ -190,6 +190,14 @@ impl Service {
                     .collect(),
                 facts: self.enforcer.charter().catalog.facts.clone(),
                 has_body: self.body.is_some(),
+                safe_temperatures: {
+                    let f = &self.enforcer.charter().policy.foundation;
+                    f.species
+                        .iter()
+                        .filter(|s| f.is_protected(&s.name))
+                        .map(|s| (s.name.clone(), s.safe_min_c, s.safe_max_c))
+                        .collect()
+                },
             },
             Request::Status => {
                 let state = self.enforcer.state();

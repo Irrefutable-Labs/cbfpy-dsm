@@ -1,0 +1,119 @@
+{
+  "rooms": {
+    "ada_room": {
+      "locked": false,
+      "celsius": 16
+    },
+    "ben_room": {
+      "locked": false,
+      "celsius": 21
+    },
+    "lounge": {
+      "locked": false,
+      "celsius": 22
+    },
+    "office": {
+      "locked": false,
+      "celsius": 19
+    }
+  },
+  "zones": [
+    "garden"
+  ],
+  "records": {
+    "ada": {
+      "allergies": [
+        "penicillin"
+      ],
+      "due": [
+        "paracetamol"
+      ]
+    },
+    "ben": {
+      "allergies": [],
+      "due": [
+        "insulin"
+      ]
+    }
+  },
+  "beings": [
+    {
+      "id": "ada",
+      "species": "human",
+      "place": "ada_room",
+      "levels": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "id": "ben",
+      "species": "human",
+      "place": "ben_room",
+      "levels": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "id": "rex",
+      "species": "dog",
+      "place": "lounge",
+      "levels": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "id": "hive",
+      "species": "honeybee",
+      "place": "garden",
+      "levels": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "id": "ants",
+      "species": "ant",
+      "place": "garden",
+      "levels": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    }
+  ],
+  "feeds_down": false,
+  "events": [
+    {
+      "event": "feeds_down",
+      "at": 13
+    },
+    {
+      "event": "feeds_up",
+      "at": 15
+    }
+  ],
+  "tick": 0,
+  "harms": []
+}
